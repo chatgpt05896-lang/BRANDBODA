@@ -1,0 +1,16 @@
+app = "brandboda"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  app = "python3 -m BrandrdXMusic"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory_mb = 1024
+
+[[swap]]
+  size_mb = 512
