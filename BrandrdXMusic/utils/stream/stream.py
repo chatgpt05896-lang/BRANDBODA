@@ -30,16 +30,17 @@ from config import BANNED_USERS, lyrical
 from time import time
 from BrandrdXMusic.utils.extraction import extract_user
 
+# --- استدعاء دالة التصميم الجديدة ---
+from BrandrdXMusic.utils.thumbnails import gen_thumb
+
 # Define a dictionary to track the last message timestamp for each user
 user_last_message_time = {}
 user_command_count = {}
-# Define the threshold for command spamming (e.g., 20 commands within 60 seconds)
+# Define the threshold for command spamming
 SPAM_THRESHOLD = 2
 SPAM_WINDOW_SECONDS = 5
 
-
 from pyrogram.types import InlineKeyboardMarkup
-
 import config
 from BrandrdXMusic import Carbon, YouTube, app
 from BrandrdXMusic.core.call import Hotty
@@ -73,6 +74,8 @@ async def stream(
         return
     if forceplay:
         await Hotty.force_stop_stream(chat_id)
+        
+    # --- تشغيل قائمة تشغيل (Playlist) ---
     if streamtype == "playlist":
         msg = f"{_['play_19']}\n\n"
         count = 0
@@ -138,7 +141,10 @@ async def stream(
                     "video" if video else "audio",
                     forceplay=forceplay,
                 )
-                img = await get_thumb(vidid)
+                
+                # [تعديل] استخدام التصميم الجديد
+                img = await gen_thumb(vidid, user_id, theme="default")
+                
                 button = stream_markup(_, vidid, chat_id)
                 run = await app.send_photo(
                     original_chat_id,
@@ -171,6 +177,8 @@ async def stream(
                 caption=_["play_21"].format(position, link),
                 reply_markup=upl,
             )
+
+    # --- تشغيل يوتيوب (YouTube) ---
     elif streamtype == "youtube":
         link = result["link"]
         vidid = result["vidid"]
@@ -196,7 +204,10 @@ async def stream(
                 user_id,
                 "video" if video else "audio",
             )
-            img = await get_thumb(vidid)
+            
+            # [تعديل] استخدام التصميم الجديد في الانتظار
+            img = await gen_thumb(vidid, user_id, theme="default")
+            
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
             await app.send_photo(
@@ -229,7 +240,10 @@ async def stream(
                 "video" if video else "audio",
                 forceplay=forceplay,
             )
-            img = await get_thumb(vidid)
+            
+            # [تعديل] استخدام التصميم الجديد في التشغيل
+            img = await gen_thumb(vidid, user_id, theme="default")
+            
             button = stream_markup(_, vidid, chat_id)
             run = await app.send_photo(
                 original_chat_id,
@@ -245,6 +259,8 @@ async def stream(
 
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
+
+    # --- ساوند كلاود (SoundCloud) ---
     elif streamtype == "soundcloud":
         file_path = result["filepath"]
         title = result["title"]
@@ -284,7 +300,7 @@ async def stream(
                 "audio",
                 forceplay=forceplay,
             )
-            button = stream_markup2(_, chat_id)
+            button = stream_markup(_, chat_id)
             run = await app.send_photo(
                 original_chat_id,
                 photo=config.SOUNCLOUD_IMG_URL,
@@ -295,6 +311,8 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
+    # --- تيليجرام (Telegram Files) ---
     elif streamtype == "telegram":
         file_path = result["path"]
         link = result["link"]
@@ -338,7 +356,7 @@ async def stream(
             )
             if video:
                 await add_active_video_chat(chat_id)
-            button = stream_markup2(_, chat_id)
+            button = stream_markup(_, chat_id)
             run = await app.send_photo(
                 original_chat_id,
                 photo=config.TELEGRAM_VIDEO_URL if video else config.TELEGRAM_AUDIO_URL,
@@ -347,6 +365,8 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
+    # --- بث مباشر (Live) ---
     elif streamtype == "live":
         link = result["link"]
         vidid = result["vidid"]
@@ -398,8 +418,11 @@ async def stream(
                 "video" if video else "audio",
                 forceplay=forceplay,
             )
-            img = await get_thumb(vidid)
-            button = stream_markup2(_, chat_id)
+            
+            # [تعديل] استخدام التصميم الجديد
+            img = await gen_thumb(vidid, user_id, theme="default")
+            
+            button = stream_markup(_, chat_id)
             run = await app.send_photo(
                 original_chat_id,
                 photo=img,
@@ -413,6 +436,8 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
+    # --- روابط خارجية (Index/M3u8) ---
     elif streamtype == "index":
         link = result
         title = "ɪɴᴅᴇx ᴏʀ ᴍ3ᴜ8 ʟɪɴᴋ"
@@ -454,7 +479,7 @@ async def stream(
                 "video" if video else "audio",
                 forceplay=forceplay,
             )
-            button = stream_markup2(_, chat_id)
+            button = stream_markup(_, chat_id)
             run = await app.send_photo(
                 original_chat_id,
                 photo=config.STREAM_IMG_URL,
@@ -466,26 +491,9 @@ async def stream(
             await mystic.delete()
 
 
-# Function to get thumbnail by video ID
+# دالة احتياطية لو حصل مشكلة (Fallback)
 async def get_thumb(videoid):
     try:
-        # Search for the video using video ID
-        query = f"https://www.youtube.com/watch?v={videoid}"
-        results = VideosSearch(query, limit=1)
-        for result in (await results.next())["result"]:
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        return thumbnail
-    except Exception as e:
         return config.YOUTUBE_IMG_URL
-
-
-async def get_thumb(vidid):
-    try:
-        # Search for the video using video ID
-        query = f"https://www.youtube.com/watch?v={vidid}"
-        results = VideosSearch(query, limit=1)
-        for result in (await results.next())["result"]:
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        return thumbnail
-    except Exception as e:
-        return config.YOUTUBE_IMG_URL
+    except:
+        return config.START_IMG_URL
