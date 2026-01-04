@@ -12,7 +12,6 @@ else:
     LANCZOS = Image.LANCZOS
 
 def get_font(size):
-    # قائمة الخطوط المحتملة
     possible_fonts = [
         "BrandrdXMusic/assets/font.ttf",
         "BrandrdXMusic/font.ttf",
@@ -41,16 +40,13 @@ def truncate_text(draw, text, font, max_width):
             return temp_text
     return "..."
 
-# دالة لجلب معلومات الفيديو والصورة
 async def get_video_info(videoid):
-    # محاولة تحميل الصورة المباشرة (أسرع وأضمن من البحث)
     image_url = f"https://img.youtube.com/vi/{videoid}/maxresdefault.jpg"
     title = "Unknown Track"
     duration = "00:00"
     views = "Views"
     channel = "Music Bot"
     
-    # هنا بنحاول نحمل الصورة
     async with aiohttp.ClientSession() as session:
         async with session.get(image_url) as resp:
             if resp.status == 200:
@@ -59,94 +55,71 @@ async def get_video_info(videoid):
                 await f.close()
                 return f"cache/temp{videoid}.jpg", title, duration, views, channel
             else:
-                # لو فشل يجيب maxres نجيب hqdefault
                 async with session.get(f"https://img.youtube.com/vi/{videoid}/hqdefault.jpg") as resp2:
                     if resp2.status == 200:
                         f = await aiofiles.open(f"cache/temp{videoid}.jpg", mode="wb")
                         await f.write(await resp2.read())
                         await f.close()
                         return f"cache/temp{videoid}.jpg", title, duration, views, channel
-    
     return YOUTUBE_IMG_URL, title, duration, views, channel
 
+# --- الدالة الرئيسية للتصميم ---
 async def gen_thumb(videoid, user_id=None, theme=None):
     if os.path.isfile(f"cache/{videoid}.png"):
         return f"cache/{videoid}.png"
 
-    # 1. جلب الصورة (بطريقة مباشرة)
     thumbnail_path, title, duration, views, channel = await get_video_info(videoid)
 
     try:
-        # تجهيز الصورة الأساسية
         if os.path.isfile(thumbnail_path):
             source_art = Image.open(thumbnail_path).convert("RGBA")
         else:
             source_art = Image.open(await aiofiles.open(START_IMG_URL, "rb")).convert("RGBA")
 
-        # --- رسم الخلفية ---
+        # الخلفية
         background = source_art.resize((1280, 720), resample=LANCZOS)
         background = background.filter(ImageFilter.GaussianBlur(10))
-        # طبقة تغميق
         dark_layer = Image.new('RGBA', (1280, 720), (0, 0, 0, 100))
         background = Image.alpha_composite(background, dark_layer)
 
-        # --- رسم الدائرة (الصورة الشخصية) ---
-        # الإحداثيات للدائرة
+        # الدائرة
         circle_x, circle_y = 53, 148 
         circle_diam = 416
-        
         art_for_circle = ImageOps.fit(source_art, (circle_diam, circle_diam), centering=(0.5, 0.5), method=LANCZOS)
-        
-        # عمل قناع الدائرة
         mask = Image.new('L', (circle_diam, circle_diam), 0)
         ImageDraw.Draw(mask).ellipse((0, 0, circle_diam, circle_diam), fill=255)
-        
         final_circle_art = Image.new('RGBA', (circle_diam, circle_diam), (0,0,0,0))
         final_circle_art.paste(art_for_circle, (0, 0), mask)
-        
-        # دمج الدائرة مع الخلفية
         background.paste(final_circle_art, (circle_x, circle_y), final_circle_art)
 
-        # --- وضع القالب (Overlay) ---
+        # القالب (Overlay)
         overlay_path = "BrandrdXMusic/assets/overlay.png"
         if os.path.isfile(overlay_path):
             overlay = Image.open(overlay_path).convert("RGBA")
             overlay = overlay.resize((1280, 720), resample=LANCZOS)
             background = Image.alpha_composite(background, overlay)
 
-        # --- الكتابة (تم تعديل الإحداثيات لمنع التداخل) ---
+        # الكتابة
         draw = ImageDraw.Draw(background)
-        
-        f_title = get_font(40)  # خط العنوان
-        f_info = get_font(30)   # خط المعلومات
-        f_time = get_font(25)   # خط الوقت
+        f_title = get_font(40)
+        f_info = get_font(30)
+        f_time = get_font(25)
 
-        # [تعديل هام] تحريك الكلام لليمين لتفادي "Name:", "By:"
-        # الرقم 730 هو بداية الكلام الجديد (كان 601)
         text_start_x = 730 
         
-        # 1. العنوان (Name)
         draw.text((text_start_x, 185), "Music Audio Track", font=f_title, fill="white")
-        
-        # 2. الفنان (By)
         draw.text((text_start_x, 255), f"Added By: {user_id or 'User'}", font=f_info, fill="#dddddd")
-
-        # 3. المشاهدات (Views)
         draw.text((text_start_x, 320), "Views: Like", font=f_info, fill="#bbbbbb")
 
-        # 4. شريط الوقت
         bar_start_x = 500
         bar_end_x = 1150
         time_y = 390
-        
         draw.text((bar_start_x, time_y), "00:00", font=f_time, fill="white")
         draw.text((bar_end_x - 60, time_y), "Live", font=f_time, fill="white")
 
-        # الحفظ
         output_path = f"cache/{videoid}.png"
         background.convert("RGB").save(output_path)
         
-        # تنظيف الملف المؤقت
         if os.path.exists(thumbnail_path) and "temp" in thumbnail_path:
             os.remove(thumbnail_path)
             
@@ -155,3 +128,8 @@ async def gen_thumb(videoid, user_id=None, theme=None):
     except Exception as e:
         print(f"Error generating thumb: {e}")
         return YOUTUBE_IMG_URL
+
+# --- الدالة القديمة (عشان call.py ميضربش) ---
+async def get_thumb(videoid):
+    # بنخليها تنادي على الدالة الجديدة وخلاص
+    return await gen_thumb(videoid, user_id="Bot")
