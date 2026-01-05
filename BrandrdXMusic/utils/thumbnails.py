@@ -4,15 +4,17 @@ import asyncio
 import aiofiles
 import aiohttp
 import traceback
+import subprocess
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageChops
 from youtubesearchpython.__future__ import VideosSearch
 from config import YOUTUBE_IMG_URL
 
-# 🟢 استيراد مكتبات العربي بأمان تام
+# 🟢 محاولة استيراد مكتبات العربي
 try:
     import arabic_reshaper
     from bidi.algorithm import get_display
 except ImportError:
+    print("⚠️ Arabic libraries missing. Installing fallback...")
     def get_display(text): return str(text)
     class arabic_reshaper:
         @staticmethod
@@ -22,7 +24,7 @@ except ImportError:
 # ⚙️ الإحداثيات والإعدادات
 # ==================================================================
 
-# إحداثيات الدائرة (معدلة)
+# إحداثيات الدائرة
 BOX_LEFT = 115
 BOX_TOP = 122
 BOX_RIGHT = 453
@@ -51,7 +53,7 @@ COLOR_NAME = "white"
 COLOR_GLOW = "#00d4ff"
 
 # ==================================================================
-# 🛠️ الدوال المساعدة
+# 🛠️ معالجة الخطوط (الحل الجذري)
 # ==================================================================
 
 if hasattr(Image, "Resampling"):
@@ -59,65 +61,78 @@ if hasattr(Image, "Resampling"):
 else:
     LANCZOS = Image.LANCZOS
 
-# متغير عام لتخزين مسار الخط
-CACHED_FONT_PATH = None
+# مسار الخط الإجباري
+FORCED_FONT_PATH = "cache/Cairo-Bold.ttf"
 
-async def download_font_if_needed():
-    global CACHED_FONT_PATH
-    font_path = "cache/cairo_bold.ttf"
-    
-    if os.path.exists(font_path):
-        CACHED_FONT_PATH = font_path
+async def force_download_font():
+    """يحمل الخط بأي طريقة ممكنة (Python أو System)"""
+    if os.path.exists(FORCED_FONT_PATH):
         return
 
-    url = "https://github.com/google/fonts/raw/main/ofl/cairo/Cairo-Bold.ttf"
-    if not os.path.exists("cache"): 
+    if not os.path.exists("cache"):
         try: os.makedirs("cache")
         except: pass
-    
+
+    url = "https://github.com/google/fonts/raw/main/ofl/cairo/Cairo-Bold.ttf"
+    print(f"⏳ Attempting to download font to {FORCED_FONT_PATH}...")
+
+    # الطريقة 1: باستخدام Python aiohttp
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
-                    f = await aiofiles.open(font_path, mode='wb')
-                    await f.write(await resp.read())
-                    await f.close()
-                    CACHED_FONT_PATH = font_path
-                    print("✅ Font Downloaded")
-    except:
-        pass
+                    data = await resp.read()
+                    async with aiofiles.open(FORCED_FONT_PATH, "wb") as f:
+                        await f.write(data)
+                    print("✅ Font downloaded via Python!")
+                    return
+    except Exception as e:
+        print(f"⚠️ Python download failed: {e}")
+
+    # الطريقة 2: باستخدام أوامر النظام (wget/curl) - حل الطوارئ
+    try:
+        print("🔄 Trying system download (wget/curl)...")
+        subprocess.run(["wget", "-O", FORCED_FONT_PATH, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(FORCED_FONT_PATH): return
+        
+        subprocess.run(["curl", "-o", FORCED_FONT_PATH, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(FORCED_FONT_PATH): return
+    except Exception as e:
+        print(f"⚠️ System download failed: {e}")
 
 def get_font(size):
-    global CACHED_FONT_PATH
-    try:
-        # لو الخط اللي نزلناه موجود، استخدمه
-        if CACHED_FONT_PATH and os.path.exists(CACHED_FONT_PATH):
-            return ImageFont.truetype(CACHED_FONT_PATH, size)
+    # 1. الأولوية القصوى للخط اللي حملناه
+    if os.path.exists(FORCED_FONT_PATH):
+        try:
+            return ImageFont.truetype(FORCED_FONT_PATH, size)
+        except: pass
+
+    # 2. خطوط احتياطية
+    backups = [
+        "BrandrdXMusic/assets/font.ttf",
+        "assets/font.ttf",
+        "font.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf" # لو شغال على ويندوز
+    ]
+    
+    for path in backups:
+        if os.path.isfile(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except: continue
             
-        # لو مش موجود، جرب خطوط النظام
-        priority_fonts = [
-            "cache/cairo_bold.ttf",
-            "BrandrdXMusic/assets/font.ttf",
-            "assets/font.ttf",
-            "font.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        ]
-        for path in priority_fonts:
-            if os.path.isfile(path):
-                try:
-                    return ImageFont.truetype(path, size)
-                except: continue
-        return ImageFont.load_default()
-    except:
-        return ImageFont.load_default()
+    # 3. لو كله فشل، ده اللي بيطلع مربعات (للأسف مفيش حل غيره لو مفيش خطوط)
+    return ImageFont.load_default()
 
 def fix_text(text):
     text = str(text)
     try:
-        # استخدام الطريقة الأبسط للتشكيل لتجنب الأخطاء
-        reshaped_text = arabic_reshaper.reshape(text) 
-        bidi_text = get_display(reshaped_text)
-        return bidi_text
+        # تبسيط المعالجة
+        reshaped = arabic_reshaper.reshape(text)
+        bidi = get_display(reshaped)
+        return bidi
     except:
         return text
 
@@ -159,9 +174,8 @@ def format_views(views):
 def draw_shadowed_text(draw, pos, text, font, color="white", shadow_color="black"):
     try:
         x, y = pos
-        # التأكد إن الإحداثيات أرقام صحيحة
-        draw.text((int(x) + 2, int(y) + 2), text, font=font, fill=shadow_color)
-        draw.text((int(x), int(y)), text, font=font, fill=color)
+        draw.text((x + 2, y + 2), text, font=font, fill=shadow_color)
+        draw.text((x, y), text, font=font, fill=color)
     except: pass
 
 def draw_neon_text(base_img, pos, text, font):
@@ -177,7 +191,7 @@ def draw_neon_text(base_img, pos, text, font):
     except: pass
 
 # ==================================================================
-# 🎨 دالة الرسم (رجعت للشكل الأصلي)
+# 🎨 دالة الرسم (الكلاسيكية)
 # ==================================================================
 
 async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, videoid):
@@ -225,7 +239,7 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
         # الكتابة
         try:
             draw = ImageDraw.Draw(background)
-            # دالة get_font هتجيب الخط اللي نزلناه أو أي خط شغال
+            # استدعاء الخط (هيستخدم الخط الإجباري)
             f_50 = get_font(50)
             f_35 = get_font(35)
             f_30 = get_font(30)
@@ -268,8 +282,8 @@ async def gen_thumb(videoid, user_id=None):
     final_path = f"cache/{videoid}_final.png"
     if os.path.isfile(final_path): return final_path
 
-    # بنحاول ننزل الخط في الخلفية قبل ما نبدأ
-    await download_font_if_needed()
+    # 🔥🔥 تحميل الخط بالإجبار 🔥🔥
+    await force_download_font()
 
     temp_path = f"cache/temp_{videoid}.png"
     url = f"https://www.youtube.com/watch?v={videoid}"
