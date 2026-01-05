@@ -113,7 +113,7 @@ async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
         print(f"Error in draw_thumb: {e}")
         return thumbnail
 
-# ✅ تم تغيير الاسم هنا من get_thumb لـ gen_thumb عشان يشتغل مع البوت
+# ✅ الدالة الأساسية باسم gen_thumb
 async def gen_thumb(videoid):
     if not os.path.exists("cache"):
         os.makedirs("cache")
@@ -159,3 +159,6 @@ async def gen_thumb(videoid):
     except Exception as e:
         print(f"Error in gen_thumb: {e}")
         return YOUTUBE_IMG_URL
+
+# 👇👇👇 أهم سطر: ده اللي هيمنع الـ Import Error 👇👇👇
+get_thumb = gen_thumb
