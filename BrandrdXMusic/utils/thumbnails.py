@@ -7,14 +7,14 @@ from youtubesearchpython.__future__ import VideosSearch
 from config import YOUTUBE_IMG_URL
 
 # ==========================================
-# 🛑 إعدادات التصميم (الوزنة والذكاء)
+# 🛑 إعدادات التصميم
 # ==========================================
 OVAL_X, OVAL_Y = 160, 146
 OVAL_W, OVAL_H = 385, 355
 TEXT_X = 730
 BAR_START, BAR_END = 500, 1050 
 TIME_Y = 385 
-BLUR_VALUE = 3  # نغوشة خفيفة جداً
+BLUR_VALUE = 3
 
 if hasattr(Image, "Resampling"):
     LANCZOS = Image.Resampling.LANCZOS
@@ -22,7 +22,7 @@ else:
     LANCZOS = Image.LANCZOS
 
 # ==========================================
-# 🛠️ دوال مساعدة (Helpers)
+# 🛠️ دوال مساعدة
 # ==========================================
 def get_font(size):
     possible_fonts = [
@@ -72,11 +72,10 @@ def draw_shadow_text(draw, pos, text, font, fill="white"):
     draw.text((x, y), str(text), font=font, fill=fill)
 
 # ==========================================
-# 🎨 دالة الرسم (Drawing Logic)
+# 🎨 دالة الرسم (Internal)
 # ==========================================
 async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
     try:
-        # حماية من الخطأ لو الاسم مش موجود
         if not userid: userid = "Music Bot"
 
         if os.path.isfile(thumbnail):
@@ -84,35 +83,34 @@ async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
         else:
             source_art = Image.new('RGBA', (500, 500), (30, 30, 30))
 
-        # 1. تحسين الألوان
+        # 1. Colors
         enhancer = ImageEnhance.Color(source_art)
         source_art = enhancer.enhance(1.3)
         dom_color = get_dominant_color(source_art)
         theme_tint = (dom_color[0]//2, dom_color[1]//2, dom_color[2]//2, 150)
 
-        # 2. الخلفية
+        # 2. Background
         background = source_art.resize((1280, 720), resample=LANCZOS)
         background = background.filter(ImageFilter.GaussianBlur(BLUR_VALUE))
         tint_layer = Image.new('RGBA', (1280, 720), theme_tint)
         background = Image.alpha_composite(background, tint_layer)
 
-        # 3. الصورة البيضاوية
+        # 3. Circle/Oval
         art_for_circle = ImageOps.fit(source_art, (OVAL_W, OVAL_H), centering=(0.5, 0.5), method=LANCZOS)
         mask = Image.new('L', (OVAL_W, OVAL_H), 0)
         ImageDraw.Draw(mask).ellipse((0, 0, OVAL_W, OVAL_H), fill=255)
         
-        # توهج خفيف
         glow_size = 15
         glow_mask = mask.filter(ImageFilter.GaussianBlur(glow_size))
         background.paste(dom_color, (OVAL_X - glow_size, OVAL_Y - glow_size), mask.resize((OVAL_W + glow_size*2, OVAL_H + glow_size*2)))
         background.paste(art_for_circle, (OVAL_X, OVAL_Y), mask)
 
-        # 4. القالب (التعديل هنا: البحث في مسارات متعددة)
+        # 4. Overlay (MyDesign)
         overlay = None
         possible_paths = [
-            "mydesign.png",                      # المسار الرئيسي
-            "BrandrdXMusic/assets/mydesign.png", # مسار الـ assets
-            "assets/mydesign.png"                # مسار فرعي
+            "mydesign.png",
+            "BrandrdXMusic/assets/mydesign.png",
+            "assets/mydesign.png"
         ]
         for path in possible_paths:
             if os.path.isfile(path):
@@ -123,7 +121,7 @@ async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
             overlay = overlay.resize((1280, 720), resample=LANCZOS)
             background = Image.alpha_composite(background, overlay)
 
-        # 5. الكتابة
+        # 5. Text
         draw = ImageDraw.Draw(background)
         
         f_title, safe_title = fit_text(draw, title, 42, 500)
@@ -147,9 +145,11 @@ async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
         return thumbnail
 
 # ==========================================
-# 🚀 الدالة الأساسية (Unified Handler)
+# 🚀 الدوال الأساسية (Required Functions)
 # ==========================================
-async def get_thumb(videoid, user_id="Music Bot"):
+
+# 1. gen_thumb: دي الدالة اللي البوت بيسأل عليها
+async def gen_thumb(videoid, userid="Music Bot"):
     if not os.path.exists("cache"):
         os.makedirs("cache")
     if os.path.isfile(f"cache/{videoid}.png"):
@@ -174,8 +174,7 @@ async def get_thumb(videoid, user_id="Music Bot"):
                     await f.write(await resp.read())
                     await f.close()
 
-        # استدعاء دالة الرسم
-        final_image = await draw_thumb(f"cache/temp{videoid}.png", title, user_id, "#ff0000", duration, views, videoid)
+        final_image = await draw_thumb(f"cache/temp{videoid}.png", title, userid, "#ff0000", duration, views, videoid)
         
         try: os.remove(f"cache/temp{videoid}.png")
         except: pass     
@@ -184,3 +183,7 @@ async def get_thumb(videoid, user_id="Music Bot"):
     except Exception as e:
         print(e)
         return YOUTUBE_IMG_URL
+
+# 2. get_thumb: دي عشان التوافق مع الملفات القديمة
+async def get_thumb(videoid):
+    return await gen_thumb(videoid, userid="Music Bot")
