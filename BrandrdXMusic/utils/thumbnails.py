@@ -53,56 +53,67 @@ else:
     LANCZOS = Image.LANCZOS
 
 # ==================================================================
-# 📥 دالة تحميل الخط (تجوال Tajawal)
+# 🧠 دالة الخط الذكية (Smart Font Loader)
 # ==================================================================
 GLOBAL_FONT = None
 
-def ensure_font_exists():
+def get_smart_font_path():
     global GLOBAL_FONT
     if GLOBAL_FONT and os.path.exists(GLOBAL_FONT): return GLOBAL_FONT
-    
+
+    # 1. البحث عن الملف اليدوي (الأولوية القصوى)
+    manual_paths = [
+        "assets/font.ttf",
+        "BrandrdXMusic/assets/font.ttf",
+        "font.ttf"
+    ]
+    for p in manual_paths:
+        if os.path.exists(p):
+            print(f"✅ Using Manual Font: {p}")
+            GLOBAL_FONT = p
+            return p
+
+    # 2. البحث عن خطوط النظام (System Fonts)
+    system_fonts = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/kacst/mry_KacstQurn.ttf"
+    ]
+    for p in system_fonts:
+        if os.path.exists(p):
+            print(f"✅ Using System Font: {p}")
+            GLOBAL_FONT = p
+            return p
+
+    # 3. محاولة التحميل من النت (Fallback)
     target_path = "cache/Tajawal-Bold.ttf"
     if not os.path.exists("cache"): os.makedirs("cache", exist_ok=True)
-
+    
     if os.path.exists(target_path) and os.path.getsize(target_path) > 10000:
         GLOBAL_FONT = target_path
         return target_path
 
-    # رابط خط تجوال (Tajawal) - مستقر
     url = "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf"
-
-    print(f"⏳ Downloading Tajawal Font...")
+    print("⏳ Downloading Font from Web...")
     try:
         urllib.request.urlretrieve(url, target_path)
-        if os.path.exists(target_path) and os.path.getsize(target_path) > 10000:
-            print("✅ [SUCCESS] Tajawal Font downloaded!")
+        if os.path.exists(target_path):
+            print("✅ Downloaded Tajawal Font.")
             GLOBAL_FONT = target_path
             return target_path
     except Exception as e:
-        print(f"❌ Failed to download Tajawal: {e}")
-
-    # محاولة أخيرة: المراعي (Almarai) لو تجوال فشل
-    try:
-        url_backup = "https://github.com/google/fonts/raw/main/ofl/almarai/Almarai-Bold.ttf"
-        urllib.request.urlretrieve(url_backup, "cache/Almarai.ttf")
-        if os.path.exists("cache/Almarai.ttf"):
-            GLOBAL_FONT = "cache/Almarai.ttf"
-            return "cache/Almarai.ttf"
-    except: pass
+        print(f"❌ Download failed: {e}")
 
     return None
 
 def get_font(size):
-    font_path = ensure_font_exists()
+    font_path = get_smart_font_path()
     
     if font_path:
         try: return ImageFont.truetype(font_path, size)
         except: pass
     
-    # لو فشل خالص، جرب Arial لو ويندوز
-    try: return ImageFont.truetype("arial.ttf", size)
-    except: pass
-
     return ImageFont.load_default()
 
 # ==================================================================
@@ -231,7 +242,8 @@ async def gen_thumb(videoid, user_id=None):
     final_path = f"cache/{videoid}_final.png"
     if os.path.isfile(final_path): return final_path
 
-    ensure_font_exists()
+    # تفعيل البحث الذكي
+    get_smart_font_path()
 
     temp_path = f"cache/temp_{videoid}.png"
     url = f"https://www.youtube.com/watch?v={videoid}"
