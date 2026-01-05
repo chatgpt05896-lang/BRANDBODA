@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageChops
 from youtubesearchpython.__future__ import VideosSearch
 from config import YOUTUBE_IMG_URL
 
-# 🟢 استيراد مكتبات العربي
+# 🟢 استيراد مكتبات العربي بأمان
 try:
     import arabic_reshaper
     from bidi.algorithm import get_display
@@ -47,80 +47,77 @@ COLOR_BY = "#cccccc"
 COLOR_NAME = "white"
 COLOR_GLOW = "#00d4ff"
 
+# التأكد من نسخة Pillow
 if hasattr(Image, "Resampling"):
     LANCZOS = Image.Resampling.LANCZOS
 else:
     LANCZOS = Image.LANCZOS
 
 # ==================================================================
-# 🧠 دالة الخط الذكية (Smart Font Loader)
+# 🧠 دالة اختبار الخط (بدون أخطاء)
 # ==================================================================
-GLOBAL_FONT = None
-
-def get_smart_font_path():
-    global GLOBAL_FONT
-    if GLOBAL_FONT and os.path.exists(GLOBAL_FONT): return GLOBAL_FONT
-
-    # 1. البحث عن الملف اليدوي (الأولوية القصوى)
-    manual_paths = [
-        "assets/font.ttf",
-        "BrandrdXMusic/assets/font.ttf",
-        "font.ttf"
-    ]
-    for p in manual_paths:
-        if os.path.exists(p):
-            print(f"✅ Using Manual Font: {p}")
-            GLOBAL_FONT = p
-            return p
-
-    # 2. البحث عن خطوط النظام (System Fonts)
-    system_fonts = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-        "/usr/share/fonts/truetype/kacst/mry_KacstQurn.ttf"
-    ]
-    for p in system_fonts:
-        if os.path.exists(p):
-            print(f"✅ Using System Font: {p}")
-            GLOBAL_FONT = p
-            return p
-
-    # 3. محاولة التحميل من النت (Fallback)
-    target_path = "cache/Tajawal-Bold.ttf"
-    if not os.path.exists("cache"): os.makedirs("cache", exist_ok=True)
-    
-    if os.path.exists(target_path) and os.path.getsize(target_path) > 10000:
-        GLOBAL_FONT = target_path
-        return target_path
-
-    url = "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf"
-    print("⏳ Downloading Font from Web...")
+def is_font_valid(font_obj):
+    if font_obj is None: return False
     try:
-        urllib.request.urlretrieve(url, target_path)
-        if os.path.exists(target_path):
-            print("✅ Downloaded Tajawal Font.")
-            GLOBAL_FONT = target_path
-            return target_path
-    except Exception as e:
-        print(f"❌ Download failed: {e}")
+        test_word = "تجربة"
+        reshaped_word = arabic_reshaper.reshape(test_word)
+        display_word = get_display(reshaped_word)
+        
+        width = 0
+        try:
+            # محاولة للطريقة الجديدة
+            if hasattr(font_obj, 'getlength'):
+                width = font_obj.getlength(display_word)
+            # محاولة للطريقة القديمة
+            elif hasattr(font_obj, 'getsize'):
+                width = font_obj.getsize(display_word)[0]
+        except:
+            return False
 
-    return None
+        if width and width > 5:
+            return True
+        return False
+    except:
+        return False
 
 def get_font(size):
-    font_path = get_smart_font_path()
-    
-    if font_path:
-        try: return ImageFont.truetype(font_path, size)
-        except: pass
-    
+    candidates = [
+        "assets/font.ttf",
+        "BrandrdXMusic/assets/font.ttf",
+        "font.ttf",
+        "cache/Tajawal-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "arial.ttf"
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                font = ImageFont.truetype(path, size)
+                if is_font_valid(font): return font
+            except: continue
+
+    # Fallback Download
+    try:
+        url = "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf"
+        target = "cache/Tajawal-Bold.ttf"
+        if not os.path.exists("cache"): os.makedirs("cache", exist_ok=True)
+        if not os.path.exists(target):
+            urllib.request.urlretrieve(url, target)
+        
+        font = ImageFont.truetype(target, size)
+        if is_font_valid(font): return font
+    except: pass
+
     return ImageFont.load_default()
 
 # ==================================================================
-# 🛠️ بقية الكود
+# 🛠️ الدوال المساعدة (بدون TypeError)
 # ==================================================================
 
 def fix_text(text):
+    if text is None: return ""
     text = str(text)
     try:
         reshaped = arabic_reshaper.reshape(text)
@@ -130,19 +127,36 @@ def fix_text(text):
         return text
 
 def smart_truncate(draw, text, font, max_width):
+    if text is None: return "..."
+    text = str(text)
+    
     try:
         display_text = fix_text(text)
-        try: w = draw.textlength(display_text, font=font)
-        except: w = draw.textsize(display_text, font=font)[0]
         
+        # قياس العرض بأمان
+        w = 0
+        try:
+            if hasattr(draw, 'textlength'):
+                w = draw.textlength(display_text, font=font)
+            else:
+                w = draw.textsize(display_text, font=font)[0]
+        except: w = 0
+
         if w <= max_width: return display_text
         
-        text = str(text)
+        # التقصير التدريجي
         for i in range(len(text), 0, -1):
             temp_text = text[:i] + "..."
             temp_display = fix_text(temp_text)
-            try: w_temp = draw.textlength(temp_display, font=font)
-            except: w_temp = draw.textsize(temp_display, font=font)[0]
+            
+            w_temp = 0
+            try:
+                if hasattr(draw, 'textlength'):
+                    w_temp = draw.textlength(temp_display, font=font)
+                else:
+                    w_temp = draw.textsize(temp_display, font=font)[0]
+            except: w_temp = 0
+
             if w_temp <= max_width: return temp_display
         return "..."
     except: return "..."
@@ -160,13 +174,14 @@ def format_views(views):
 def draw_shadowed_text(draw, pos, text, font, color="white", shadow_color="black"):
     try:
         x, y = pos
+        text = str(text)
         draw.text((x + 2, y + 2), text, font=font, fill=shadow_color)
         draw.text((x, y), text, font=font, fill=color)
     except: pass
 
 def draw_neon_text(base_img, pos, text, font):
     try:
-        text = fix_text(text)
+        text = fix_text(str(text))
         glow_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
         glow_draw = ImageDraw.Draw(glow_layer)
         glow_draw.text(pos, text, font=font, fill=COLOR_GLOW)
@@ -178,11 +193,13 @@ def draw_neon_text(base_img, pos, text, font):
 
 async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, videoid):
     try:
+        # Load Image Safe
         if os.path.exists(thumbnail_path):
             try: source = Image.open(thumbnail_path).convert("RGBA")
             except: source = Image.new('RGBA', (1280, 720), (30, 30, 30))
         else: source = Image.new('RGBA', (1280, 720), (30, 30, 30))
 
+        # Background Processing
         try:
             background = source.resize((1280, 720), resample=LANCZOS)
             background = background.filter(ImageFilter.GaussianBlur(3))
@@ -190,6 +207,7 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
             background = Image.alpha_composite(background, dark_layer)
         except: background = Image.new('RGBA', (1280, 720), (0, 0, 0))
 
+        # Circle Art
         try:
             art_cropped = ImageOps.fit(source, ART_SIZE, centering=(0.5, 0.5), method=LANCZOS)
             mask = Image.new('L', ART_SIZE, 0)
@@ -198,6 +216,7 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
             background.paste(art_cropped, ART_POS, mask)
         except: pass
 
+        # Overlay
         try:
             overlay_path = "BrandrdXMusic/assets/overlay.png"
             if not os.path.isfile(overlay_path): overlay_path = "assets/overlay.png"
@@ -210,6 +229,7 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
                 background = merged.convert("RGBA")
         except: pass
 
+        # Draw Text
         try:
             draw = ImageDraw.Draw(background)
             f_50 = get_font(50)
@@ -227,23 +247,22 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
 
             draw_neon_text(background, POS_TIME_START, "00:00", f_30)
             draw_neon_text(background, POS_TIME_END, str(duration), f_30)
-        except Exception as e: print(f"Text Error: {e}")
+        except Exception as e: print(f"Text Drawing Error: {e}")
 
+        # Save
         if not os.path.exists("cache"): os.makedirs("cache", exist_ok=True)
-            
         final_path = f"cache/{videoid}_final.png"
         background.save(final_path, format="PNG")
         return final_path
 
-    except: return thumbnail_path if os.path.exists(thumbnail_path) else YOUTUBE_IMG_URL
+    except Exception as e:
+        print(f"Global Thumb Error: {e}")
+        return thumbnail_path if os.path.exists(thumbnail_path) else YOUTUBE_IMG_URL
 
 async def gen_thumb(videoid, user_id=None):
     if not os.path.exists("cache"): os.makedirs("cache", exist_ok=True)
     final_path = f"cache/{videoid}_final.png"
     if os.path.isfile(final_path): return final_path
-
-    # تفعيل البحث الذكي
-    get_smart_font_path()
 
     temp_path = f"cache/temp_{videoid}.png"
     url = f"https://www.youtube.com/watch?v={videoid}"
