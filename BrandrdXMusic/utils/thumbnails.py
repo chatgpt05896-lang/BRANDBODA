@@ -7,14 +7,14 @@ from youtubesearchpython.__future__ import VideosSearch
 from config import YOUTUBE_IMG_URL
 
 # ==========================================
-# 🛑 إعدادات التصميم والذكاء
+# 🛑 إعدادات التصميم (الوزنة والذكاء)
 # ==========================================
 OVAL_X, OVAL_Y = 160, 146
 OVAL_W, OVAL_H = 385, 355
 TEXT_X = 730
 BAR_START, BAR_END = 500, 1050 
 TIME_Y = 385 
-BLUR_VALUE = 3
+BLUR_VALUE = 3  # نغوشة خفيفة جداً
 
 if hasattr(Image, "Resampling"):
     LANCZOS = Image.Resampling.LANCZOS
@@ -72,13 +72,13 @@ def draw_shadow_text(draw, pos, text, font, fill="white"):
     draw.text((x, y), str(text), font=font, fill=fill)
 
 # ==========================================
-# 🎨 دالة الرسم (داخلية)
+# 🎨 دالة الرسم (Drawing Logic)
 # ==========================================
 async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
     try:
-        # ضمان أن userid نص وليس None
+        # حماية من الخطأ لو الاسم مش موجود
         if not userid: userid = "Music Bot"
-        
+
         if os.path.isfile(thumbnail):
             source_art = Image.open(thumbnail).convert("RGBA")
         else:
@@ -101,15 +101,25 @@ async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
         mask = Image.new('L', (OVAL_W, OVAL_H), 0)
         ImageDraw.Draw(mask).ellipse((0, 0, OVAL_W, OVAL_H), fill=255)
         
+        # توهج خفيف
         glow_size = 15
         glow_mask = mask.filter(ImageFilter.GaussianBlur(glow_size))
         background.paste(dom_color, (OVAL_X - glow_size, OVAL_Y - glow_size), mask.resize((OVAL_W + glow_size*2, OVAL_H + glow_size*2)))
         background.paste(art_for_circle, (OVAL_X, OVAL_Y), mask)
 
-        # 4. القالب
-        overlay_path = "mydesign.png"
-        if os.path.isfile(overlay_path):
-            overlay = Image.open(overlay_path).convert("RGBA")
+        # 4. القالب (التعديل هنا: البحث في مسارات متعددة)
+        overlay = None
+        possible_paths = [
+            "mydesign.png",                      # المسار الرئيسي
+            "BrandrdXMusic/assets/mydesign.png", # مسار الـ assets
+            "assets/mydesign.png"                # مسار فرعي
+        ]
+        for path in possible_paths:
+            if os.path.isfile(path):
+                overlay = Image.open(path).convert("RGBA")
+                break
+        
+        if overlay:
             overlay = overlay.resize((1280, 720), resample=LANCZOS)
             background = Image.alpha_composite(background, overlay)
 
@@ -137,14 +147,9 @@ async def draw_thumb(thumbnail, title, userid, theme, duration, views, videoid):
         return thumbnail
 
 # ==========================================
-# 🚀 الدالة الأساسية (تتعامل مع كل الحالات)
+# 🚀 الدالة الأساسية (Unified Handler)
 # ==========================================
 async def get_thumb(videoid, user_id="Music Bot"):
-    """
-    الدالة دي ذكية:
-    1. لو ناديتها بـ get_thumb(id) بس -> هتكتب Music Bot
-    2. لو ناديتها بـ get_thumb(id, user_id="Ahmed") -> هتكتب Ahmed
-    """
     if not os.path.exists("cache"):
         os.makedirs("cache")
     if os.path.isfile(f"cache/{videoid}.png"):
