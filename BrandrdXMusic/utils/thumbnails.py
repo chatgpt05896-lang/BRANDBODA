@@ -3,11 +3,11 @@ import re
 import asyncio
 import aiofiles
 import aiohttp
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageChops
 from youtubesearchpython.__future__ import VideosSearch
 from config import YOUTUBE_IMG_URL
 
-# 🟢 مكتبات دعم اللغة العربية
+# 🟢 مكتبات دعم اللغة العربية (تأكد إنك مثبتهم)
 import arabic_reshaper
 from bidi.algorithm import get_display
 
@@ -15,7 +15,7 @@ from bidi.algorithm import get_display
 # ⚙️ الإحداثيات والإعدادات
 # ==================================================================
 
-# إحداثيات الدائرة (مكان الصورة)
+# إحداثيات الدائرة
 BOX_LEFT = 115
 BOX_TOP = 120
 BOX_RIGHT = 453
@@ -32,8 +32,8 @@ POS_NAME = (TEXT_X_AXIS, 170)
 POS_BY = (TEXT_X_AXIS, 240)
 POS_VIEWS = (TEXT_X_AXIS, 310)
 
-# إحداثيات الوقت (تم الرفع 6 بكسل: 504 -> 498) ⬆️
-TIME_Y_AXIS = 498
+# إحداثيات الوقت (نزلناه 3 بكسل: 498 + 3 = 501) ⬇️
+TIME_Y_AXIS = 501
 POS_TIME_START = (60, TIME_Y_AXIS)
 POS_TIME_END = (1160, TIME_Y_AXIS)
 
@@ -53,15 +53,18 @@ else:
     LANCZOS = Image.LANCZOS
 
 def get_font(size):
-    potential_paths = [
-        "font.ttf",                      # الأولوية للملف الرئيسي
+    priority_fonts = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
         "BrandrdXMusic/assets/font.ttf",
         "assets/font.ttf",
-        "files/font.ttf"
+        "font.ttf"
     ]
-    for path in potential_paths:
+    for path in priority_fonts:
         if os.path.isfile(path):
-            return ImageFont.truetype(path, size)
+            try:
+                return ImageFont.truetype(path, size)
+            except: continue
     return ImageFont.load_default()
 
 def fix_text(text):
@@ -79,10 +82,8 @@ def smart_truncate(draw, text, font, max_width):
         w = draw.textlength(display_text, font=font)
     except:
         w = draw.textsize(display_text, font=font)[0]
-
     if w <= max_width:
         return display_text
-
     text = str(text)
     for i in range(len(text), 0, -1):
         temp_text = text[:i] + "..."
@@ -115,24 +116,17 @@ def draw_neon_text(base_img, pos, text, font):
     glow_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow_layer)
     glow_draw.text(pos, text, font=font, fill=COLOR_GLOW)
-    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=6))
+    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=8))
     base_img.alpha_composite(glow_layer)
     final_draw = ImageDraw.Draw(base_img)
     final_draw.text(pos, text, font=font, fill=(255, 255, 255, 230))
 
 # ==================================================================
-# 🎨 دالة الرسم الرئيسية
+# 🎨 دالة الرسم
 # ==================================================================
 
 async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, videoid):
     try:
-        # تجهيز البيانات
-        title = str(title or "Unknown Track")
-        userid = str(userid or "Unknown Artist")
-        views = str(views or "0")
-        duration = str(duration or "00:00")
-
-        # 1. الخلفية (Background)
         if os.path.exists(thumbnail_path):
             try:
                 source = Image.open(thumbnail_path).convert("RGBA")
@@ -141,23 +135,25 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
         else:
             source = Image.new('RGBA', (1280, 720), (30, 30, 30))
 
+        # 1. الخلفية (تغبيش خفيف جداً: Radius = 3)
         background = source.resize((1280, 720), resample=LANCZOS)
-        background = background.filter(ImageFilter.GaussianBlur(40))
-        dark_layer = Image.new('RGBA', (1280, 720), (0, 0, 0, 180))
+        background = background.filter(ImageFilter.GaussianBlur(3)) 
+        
+        # تغميق بسيط
+        dark_layer = Image.new('RGBA', (1280, 720), (0, 0, 0, 100))
         background = Image.alpha_composite(background, dark_layer)
 
-        # 2. وضع صورة الألبوم (Art) - الخطوة دي الأول عشان تبقى "ورا"
+        # 2. صورة الدائرة
         try:
             art_cropped = ImageOps.fit(source, ART_SIZE, centering=(0.5, 0.5), method=LANCZOS)
             mask = Image.new('L', ART_SIZE, 0)
             draw_mask = ImageDraw.Draw(mask)
             draw_mask.ellipse((0, 0, ART_WIDTH, ART_HEIGHT), fill=255)
-            # اللصق
             background.paste(art_cropped, ART_POS, mask)
         except Exception as e:
             print(f"[Thumb] Art Error: {e}")
 
-        # 3. وضع القالب (Overlay) - الخطوة دي التانية عشان يبقى "قدام"
+        # 3. القالب (Screen Mode لإظهار الخلفية)
         overlay_path = "BrandrdXMusic/assets/overlay.png"
         if not os.path.isfile(overlay_path):
             overlay_path = "assets/overlay.png"
@@ -166,8 +162,10 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
             try:
                 overlay = Image.open(overlay_path).convert("RGBA")
                 overlay = overlay.resize((1280, 720), resample=LANCZOS)
-                # لصق القالب فوق الصورة
-                background.paste(overlay, (0, 0), overlay)
+                bg_rgb = background.convert("RGB")
+                ov_rgb = overlay.convert("RGB")
+                merged = ImageChops.screen(bg_rgb, ov_rgb)
+                background = merged.convert("RGBA")
             except: pass
 
         # 4. الكتابة
@@ -176,20 +174,18 @@ async def draw_thumb(thumbnail_path, title, userid, theme, duration, views, vide
         f_35 = get_font(35)
         f_30 = get_font(30)
 
-        safe_title = smart_truncate(draw, title, f_50, 600)
+        safe_title = smart_truncate(draw, str(title), f_50, 600)
         draw_shadowed_text(draw, POS_NAME, f"Name: {safe_title}", f_50, COLOR_NAME)
         
-        safe_artist = smart_truncate(draw, userid, f_35, 550)
+        safe_artist = smart_truncate(draw, str(userid), f_35, 550)
         draw_shadowed_text(draw, POS_BY, f"By: {safe_artist}", f_35, COLOR_BY)
         
-        fmt_views = format_views(views)
-        full_views = fix_text(f"Views: {fmt_views}")
+        full_views = fix_text(f"Views: {format_views(views)}")
         draw_shadowed_text(draw, POS_VIEWS, full_views, f_30, COLOR_VIEWS)
 
         draw_neon_text(background, POS_TIME_START, "00:00", f_30)
-        draw_neon_text(background, POS_TIME_END, duration, f_30)
+        draw_neon_text(background, POS_TIME_END, str(duration), f_30)
 
-        # 5. الحفظ
         if not os.path.exists("cache"): os.makedirs("cache")
         final_path = f"cache/{videoid}_final.png"
         background.save(final_path, format="PNG")
