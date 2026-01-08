@@ -7,85 +7,83 @@ from pyrogram import filters
 
 load_dotenv()
 
-# Get this value from my.telegram.org/apps
-API_ID = int(getenv("API_ID", None))
-API_HASH = getenv("API_HASH", None)
+# ━━━ إعــدادات الــبــوت الــأســاســيــة ━━━
 
-# Get your token from @BotFather on Telegram.
-BOT_TOKEN = getenv("BOT_TOKEN", None)
+# احــصــل عــلــيــه مــن my.telegram.org
+API_ID = int(getenv("API_ID", "0"))
+API_HASH = getenv("API_HASH", "")
 
-# Get your mongo url from cloud.mongodb.com
-MONGO_DB_URI = getenv("MONGO_DB_URI", None)
-MUSIC_BOT_NAME = getenv("MUSIC_BOT_NAME", None)
+# تــوكــن الــبــوت مــن @BotFather
+BOT_TOKEN = getenv("BOT_TOKEN", "")
+
+# رابــط قــاعــدة الــبــيــانــات مــن cloud.mongodb.com
+MONGO_DB_URI = getenv("MONGO_DB_URI", "")
+
+# اســم الــبــوت (يــظــهــر فــي الــقــوائــم)
+MUSIC_BOT_NAME = getenv("MUSIC_BOT_NAME", "بُودَا | ʙᴏᴅَا")
+
+# وضــع الــبــوت الــخــاص (None = عــام)
 PRIVATE_BOT_MODE = getenv("PRIVATE_BOT_MODE", None)
 
+# ━━━ إعــدادات الــأوامــر ━━━
+# الــعــلامــة "" (الــفــارغــة) هــي الــتــي تــجــعــل الــبــوت يــعــمــل بــدون /
+COMMAND_PREFIXES = ["/", "!", ".", "", "s", "S", "#"]
+
+# حــدود الــتــشــغــيــل (بــالــدقــائــق)
 DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", 900))
 
-# Chat id of a group for logging bot's activities
-LOGGER_ID = int(getenv("LOGGER_ID", None))
+# آيــدي جــروب الــســجــل (Log Group)
+LOGGER_ID = int(getenv("LOGGER_ID", "0"))
 
-# Get this value from @BRANDRD_ROBOT on Telegram by /id
-OWNER_ID = int(getenv("OWNER_ID", "7250012103"))
+# ━━━ آيــدي الــمــطــور الــأســاســي (تم التعديل) ━━━
+OWNER_ID = int(getenv("OWNER_ID", "8313557781"))
 
+# تــفــعــيــل الــســجــلــات
 LOG = int(getenv("LOG", True))
 
-API_URL = getenv("API_URL", 'https://api.thequickearn.xyz')
-VIDEO_API_URL = getenv("VIDEO_API_URL", 'https://api.video.thequickearn.xyz')
-API_KEY = getenv("API_KEY", 'NxGBNexGenBots6c30dd')
-
-## Fill these variables if you're deploying on heroku.
-# Your heroku app name
+# ━━━ إعــدادات هــيــروكــو ━━━
 HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
-# Get it from http://dashboard.heroku.com/account
 HEROKU_API_KEY = getenv("HEROKU_API_KEY")
 
-UPSTREAM_REPO = getenv(
-    "UPSTREAM_REPO",
-    "https://github.com/WCGKING/BrandrdXMusic",
-)
-UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "main")
-GIT_TOKEN = getenv(
-    "GIT_TOKEN", None
-)  # Fill this variable if your upstream repository is private
+# ━━━ روابــط الــســورس والــتــحــديــثــات ━━━
+# 🛑 تم تعطيل الرابط هنا لمنع إعادة تحميل السورس وحذف التعديلات
+UPSTREAM_REPO = ""
+UPSTREAM_BRANCH = "main"
+GIT_TOKEN = getenv("GIT_TOKEN", None)
 
-SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/BRANDED_PAID_CC")
-SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/BRANDED_WORLD")
+# ━━━ قــنــوات وجــروبــات الــدعــم ━━━
+SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/SourceBoda")
+SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/music0587")
 
-# Set this to True if you want the assistant to automatically leave chats after an interval
+# مــغــادرة الــمــســاعــد تــلــقــائــيــاً
 AUTO_LEAVING_ASSISTANT = bool(getenv("AUTO_LEAVING_ASSISTANT", False))
 
-# Auto Gcast/Broadcast Handler (True = broadcast on , False = broadcast off During Hosting, Dont Do anything here.)
+# الــإذاعــة الــتــلــقــائــيــة
 AUTO_GCAST = os.getenv("AUTO_GCAST")
-
-# Auto Broadcast Message That You Want Use In Auto Broadcast In All Groups.
 AUTO_GCAST_MSG = getenv("AUTO_GCAST_MSG", "")
 
-# Get this credentials from https://developer.spotify.com/dashboard
+# ━━━ إعــدادات ســبــوتــيــفــاي ━━━
 SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "bcfe26b0ebc3428882a0b5fb3e872473")
 SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "907c6a054c214005aeae1fd752273cc4")
 
-
-# Maximum limit for fetching playlist's track from youtube, spotify, apple links.
+# حــدود الــقــوائــم والــتــحــمــيــل
 SERVER_PLAYLIST_LIMIT = int(getenv("SERVER_PLAYLIST_LIMIT", "50"))
 PLAYLIST_FETCH_LIMIT = int(getenv("PLAYLIST_FETCH_LIMIT", "25"))
-
-SONG_DOWNLOAD_DURATION = int(getenv("SONG_DOWNLOAD_DURATION_LIMIT", "180"))
+SONG_DOWNLOAD_DURATION = int(getenv("SONG_DOWNLOAD_DURATION_LIMIT", "500"))
 SONG_DOWNLOAD_DURATION_LIMIT = int(getenv("SONG_DOWNLOAD_DURATION_LIMIT", "2000"))
 
-# Telegram audio and video file size limit (in bytes)
+# حــدود الــأحــجــام
 TG_AUDIO_FILESIZE_LIMIT = int(getenv("TG_AUDIO_FILESIZE_LIMIT", 104857600))
 TG_VIDEO_FILESIZE_LIMIT = int(getenv("TG_VIDEO_FILESIZE_LIMIT", 1073741824))
-# Checkout https://www.gbmb.org/mb-to-bytes for converting mb to bytes
 
-
-# Get your pyrogram v2 session from @BRANDEDSTRINGSESSION_BOT on Telegram
+# ━━━ جــلــســات بــايــروجــرام ━━━
 STRING1 = getenv("STRING_SESSION",  None)
 STRING2 = getenv("STRING_SESSION2", None)
 STRING3 = getenv("STRING_SESSION3", None)
 STRING4 = getenv("STRING_SESSION4", None)
 STRING5 = getenv("STRING_SESSION5", None)
 
-
+# قــوائــم الــذاكــرة الــمــؤقــتــة
 BANNED_USERS = filters.user()
 adminlist = {}
 lyrical = {}
@@ -93,41 +91,38 @@ votemode = {}
 autoclean = []
 confirmer = {}
 
+# ━━━ صــور الــبــوت ━━━
 
-START_IMG_URL = getenv(
-    "START_IMG_URL", "https://files.catbox.moe/zuqgbn.jpg"
-)
-PING_IMG_URL = getenv(
-    "PING_IMG_URL", "https://files.catbox.moe/2ase3x.jpg"
-)
-PLAYLIST_IMG_URL = "https://te.legra.ph/file/14eb59ea7d31229d8d751.jpg"
-STATS_IMG_URL = "https://te.legra.ph/file/4310ea5f523520b2b765b.jpg"
-TELEGRAM_AUDIO_URL = "https://te.legra.ph/file/923c1faac33d8c70335dc.jpg"
-TELEGRAM_VIDEO_URL = "https://te.legra.ph/file/6c66f8b192532fe758e82.jpg"
-STREAM_IMG_URL = "https://te.legra.ph/file/ebc4dc6357be06e08a3ed.jpg"
-SOUNCLOUD_IMG_URL = "https://te.legra.ph/file/d339f390ec168c19879c6.jpg"
-YOUTUBE_IMG_URL = "https://te.legra.ph/file/ee0cd53ab73f08f4a3627.jpg"
-SPOTIFY_ARTIST_IMG_URL = "https://te.legra.ph/file/5f9fb5bba66021c782d96.jpg"
-SPOTIFY_ALBUM_IMG_URL = "https://te.legra.ph/file/affe0afec5c7ad63676a4.jpg"
-SPOTIFY_PLAYLIST_IMG_URL = "https://te.legra.ph/file/3c446e8dee78ed0ca62ff.jpg"
+START_IMG_URL = getenv("START_IMG_URL", "https://files.catbox.moe/exvq3d.jpg")
+PING_IMG_URL = getenv("PING_IMG_URL", "https://files.catbox.moe/kmn0a6.jpg")
+PLAYLIST_IMG_URL = "https://files.catbox.moe/zs9g3f.jpg"
+STATS_IMG_URL = "https://files.catbox.moe/b91yyd.jpg"
+TELEGRAM_AUDIO_URL = "https://files.catbox.moe/wqipfn.jpg"
+TELEGRAM_VIDEO_URL = "https://files.catbox.moe/4qhfqw.jpg"
+STREAM_IMG_URL = "https://files.catbox.moe/b6533n.jpg"
+SOUNCLOUD_IMG_URL = "https://files.catbox.moe/xi3mb1.jpg"
+YOUTUBE_IMG_URL = "https://files.catbox.moe/efzuds.jpg"
+SPOTIFY_ARTIST_IMG_URL = "https://files.catbox.moe/r1lc37.jpg"
+SPOTIFY_ALBUM_IMG_URL = "https://files.catbox.moe/ht74e3.jpg"
+SPOTIFY_PLAYLIST_IMG_URL = "https://files.catbox.moe/5e5uqo.jpg"
 
 
+# دالــة تــحــويــل الــوقــت
 def time_to_seconds(time):
     stringt = str(time)
     return sum(int(x) * 60**i for i, x in enumerate(reversed(stringt.split(":"))))
 
-
 DURATION_LIMIT = int(time_to_seconds(f"{DURATION_LIMIT_MIN}:00"))
 
-
+# الــتــحــقــق مــن الــروابــط
 if SUPPORT_CHANNEL:
     if not re.match("(?:http|https)://", SUPPORT_CHANNEL):
         raise SystemExit(
-            "[ERROR] - Your SUPPORT_CHANNEL url is wrong. Please ensure that it starts with https://"
+            "[ERROR] - رابــط قــنــاة الــدعــم غــيــر صــحــيــح. يــجــب أن يــبــدأ بـ https://"
         )
 
 if SUPPORT_CHAT:
     if not re.match("(?:http|https)://", SUPPORT_CHAT):
         raise SystemExit(
-            "[ERROR] - Your SUPPORT_CHAT url is wrong. Please ensure that it starts with https://"
+            "[ERROR] - رابــط مــجــمــوعــة الــدعــم غــيــر صــحــيــح. يــجــب أن يــبــدأ بـ https://"
         )
