@@ -1,5 +1,16 @@
 import asyncio
 import importlib
+
+# ---------------------------------------------------
+# 🔥 1. تفعيل التيربو (uvloop) في البداية
+# ---------------------------------------------------
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
+# ---------------------------------------------------
+
 from sys import argv
 from pyrogram import idle
 from pytgcalls.exceptions import NoActiveGroupCall
@@ -23,7 +34,9 @@ async def init():
     ):
         LOGGER(__name__).error("Assistant client variables not defined, exiting...")
         exit()
+    
     await sudo()
+    
     try:
         users = await get_gbanned()
         for user_id in users:
@@ -33,30 +46,46 @@ async def init():
             BANNED_USERS.add(user_id)
     except:
         pass
+    
     await app.start()
+    
     for all_module in ALL_MODULES:
         importlib.import_module("BrandrdXMusic.plugins" + all_module)
+    
     LOGGER("BrandrdXMusic.plugins").info("Successfully Imported Modules...")
+    
     await userbot.start()
     await Hotty.start()
+    
     try:
-        await Hotty.stream_call("https://graph.org/file/e999c40cb700e7c684b75.mp4")
+        await Hotty.stream_call("https://files.catbox.moe/7lvv4u.jpg")
     except NoActiveGroupCall:
         LOGGER("BrandrdXMusic").error(
-            "Please turn on the videochat of your log group\channel.\n\nStopping Bot..."
+            "Please turn on the videochat of your log group/channel.\n\nStopping Bot..."
         )
         exit()
     except:
         pass
+    
     await Hotty.decorators()
-    LOGGER("BrandrdXMusic").info(
-        "ᴅʀᴏᴘ ʏᴏᴜʀ ɢɪʀʟꜰʀɪᴇɴᴅ'ꜱ ɴᴜᴍʙᴇʀ ᴀᴛ @BRANDED_PAID_CC ᴊᴏɪɴ @BRANDRD_BOT , @BRANDED_WORLD ꜰᴏʀ ᴀɴʏ ɪꜱꜱᴜᴇꜱ"
-    )
+    
+    # ✅ الرسالة العربية المطلوبة
+    print("-------------------------------------------------------")
+    print("الـبـوت اشـتـغـل يـ عـزيـزي الـمـطـور @S_G0C7")
+    print("قـنـاة الـتحـديـثـات https://t.me/SourceBoda")
+    print("-------------------------------------------------------")
+    
+    # تسجيل في اللوج أيضاً للتأكيد
+    LOGGER("BrandrdXMusic").info("Bot Started: @S_G0C7 - https://t.me/SourceBoda")
+    
     await idle()
+    
     await app.stop()
     await userbot.stop()
     LOGGER("BrandrdXMusic").info("Stopping Brandrd Music Bot...")
 
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(init())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(init())
