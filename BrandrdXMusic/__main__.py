@@ -2,7 +2,7 @@ import asyncio
 import importlib
 
 # ---------------------------------------------------
-# 🔥 1. تفعيل التيربو (uvloop) في البداية
+# 🔥 1. تفعيل التيربو (uvloop)
 # ---------------------------------------------------
 try:
     import uvloop
@@ -25,6 +25,7 @@ from config import BANNED_USERS
 
 
 async def init():
+    # التحقق من المتغيرات
     if (
         not config.STRING1
         and not config.STRING2
@@ -37,6 +38,7 @@ async def init():
     
     await sudo()
     
+    # تحميل المحظורים
     try:
         users = await get_gbanned()
         for user_id in users:
@@ -47,16 +49,20 @@ async def init():
     except:
         pass
     
+    # تشغيل البوت الأساسي
     await app.start()
     
+    # استيراد الإضافات
     for all_module in ALL_MODULES:
         importlib.import_module("BrandrdXMusic.plugins" + all_module)
     
     LOGGER("BrandrdXMusic.plugins").info("Successfully Imported Modules...")
     
+    # تشغيل المساعد والكول
     await userbot.start()
     await Hotty.start()
     
+    # الانضمام لمجموعة السجل
     try:
         await Hotty.stream_call("https://files.catbox.moe/7lvv4u.jpg")
     except NoActiveGroupCall:
@@ -69,23 +75,24 @@ async def init():
     
     await Hotty.decorators()
     
-    # ✅ الرسالة العربية المطلوبة
+    # ✅ الرسالة العربية
     print("-------------------------------------------------------")
     print("الـبـوت اشـتـغـل يـ عـزيـزي الـمـطـور @S_G0C7")
     print("قـنـاة الـتحـديـثـات https://t.me/SourceBoda")
     print("-------------------------------------------------------")
     
-    # تسجيل في اللوج أيضاً للتأكيد
     LOGGER("BrandrdXMusic").info("Bot Started: @S_G0C7 - https://t.me/SourceBoda")
     
     await idle()
     
+    # إيقاف التشغيل
     await app.stop()
     await userbot.stop()
     LOGGER("BrandrdXMusic").info("Stopping Brandrd Music Bot...")
 
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # ✅ التعديل هنا: استخدام الحلقة الافتراضية بدلاً من إنشاء واحدة جديدة
+    # ده بيمنع خطأ "attached to a different loop"
+    loop = asyncio.get_event_loop_policy().get_event_loop()
     loop.run_until_complete(init())
