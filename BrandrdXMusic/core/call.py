@@ -8,6 +8,7 @@
 
 [النظام: وحدة التحكم - Zero Latency + Concurrency]
 [التقنية: asyncio.gather + FFmpeg Ultrafast + Non-blocking UI]
+[التعديل: إصلاح مشكلة Image Argument + منع الكراش]
 """
 
 import asyncio
@@ -26,8 +27,18 @@ from pytgcalls.types import (
     MediaStream, 
     StreamEnded, 
     Update, 
-    VideoQuality
+    VideoQuality,
+    GroupCallConfig
 )
+
+# =======================================================================
+# 🩹 0. تصحيح كراش المكتبة (Critical Patch)
+# =======================================================================
+try:
+    from pytgcalls.types import UpdateGroupCall
+    if not hasattr(UpdateGroupCall, 'chat_id'):
+        UpdateGroupCall.chat_id = property(lambda self: self.chat.id if hasattr(self.chat, 'id') else 0)
+except: pass
 
 # =======================================================================
 # 🧱 جدار الحماية (Firewall Import Logic)
@@ -88,16 +99,14 @@ def capture_internal_err(func):
     return wrapper
 
 # =======================================================================
-# 🚀 إعدادات البث (Zero Latency Config)
+# 🚀 إعدادات البث (Updated Media Streamer)
 # =======================================================================
 
-def dynamic_media_stream(path: str, video: bool = False, ffmpeg_params: str = None) -> MediaStream:
+def dynamic_media_stream(path: str, video: bool = False, image: str = None, ffmpeg_params: str = None) -> MediaStream:
     if not path:
         raise AssistantErr("Media path is invalid")
 
-    # 🔥 إعدادات السرعة القصوى:
-    # -preset ultrafast: أسرع تشفير ممكن لتقليل استخدام المعالج
-    # -tune zerolatency: لإلغاء التأخير الزمني (Lag)
+    # 🔥 إعدادات السرعة القصوى (FFmpeg Tweak)
     base_params = "-preset ultrafast -tune zerolatency"
     final_params = f"{base_params} {ffmpeg_params}" if ffmpeg_params else base_params
 
@@ -105,19 +114,31 @@ def dynamic_media_stream(path: str, video: bool = False, ffmpeg_params: str = No
         return MediaStream(
             media_path=path,
             audio_parameters=AudioQuality.HIGH,
-            video_parameters=VideoQuality.SD_480p, # 480p للسرعة والثبات
+            video_parameters=VideoQuality.SD_480p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
             ffmpeg_parameters=final_params,
         )
     else:
-        return MediaStream(
-            media_path=path,
-            audio_parameters=AudioQuality.HIGH,
-            audio_flags=MediaStream.Flags.REQUIRED,
-            video_flags=MediaStream.Flags.IGNORE,
-            ffmpeg_parameters=final_params,
-        )
+        # ✅ التعديل هنا: دعم الصورة كخلفية للصوت
+        if image:
+            return MediaStream(
+                media_path=path,
+                image_path=image, # بعض النسخ تستخدم هذا
+                audio_parameters=AudioQuality.HIGH,
+                video_parameters=VideoQuality.SD_480p,
+                audio_flags=MediaStream.Flags.REQUIRED,
+                video_flags=MediaStream.Flags.IGNORE, 
+                ffmpeg_parameters=final_params,
+            )
+        else:
+            return MediaStream(
+                media_path=path,
+                audio_parameters=AudioQuality.HIGH,
+                audio_flags=MediaStream.Flags.REQUIRED,
+                video_flags=MediaStream.Flags.IGNORE,
+                ffmpeg_parameters=final_params,
+            )
 
 async def _clear_(chat_id: int) -> None:
     try:
@@ -166,11 +187,10 @@ class Call:
             return self.one
         except: return self.one
 
-    # ⚡ التشغيل المتوازي (Concurrency Start)
+    # ⚡ التشغيل المتوازي
     async def start(self) -> None:
         LOGGER(__name__).info("Starting PyTgCalls Clients Concurrently...")
         clients = [cli for cli in [self.one, self.two, self.three, self.four, self.five] if cli]
-        # تشغيل جميع المساعدين في نفس اللحظة بدل الانتظار بالتتابع
         if clients:
             await asyncio.gather(*[cli.start() for cli in clients])
 
@@ -219,9 +239,10 @@ class Call:
         await assistant.unmute(chat_id)
 
     @capture_internal_err
-    async def skip_stream(self, chat_id: int, link: str, video: Union[bool, str] = None) -> None:
+    async def skip_stream(self, chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None) -> None:
         assistant = await self.get_call_engine(chat_id)
-        stream = dynamic_media_stream(path=link, video=bool(video))
+        # تم تعديل الدالة لتقبل image
+        stream = dynamic_media_stream(path=link, video=bool(video), image=image)
         await assistant.play(chat_id, stream)
 
     @capture_internal_err
@@ -242,7 +263,6 @@ class Call:
         if not os.path.exists(out):
             vs = str(2.0 / float(speed))
             cmd = f'ffmpeg -i "{file_path}" -filter:v "setpts={vs}*PTS" -filter:a atempo={speed} -y "{out}"'
-            # تشغيل التحويل في الخلفية (Non-blocking)
             proc = await asyncio.create_subprocess_shell(cmd, stdin=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             await proc.communicate()
 
@@ -259,12 +279,13 @@ class Call:
             })
 
     @capture_internal_err
-    async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None) -> None:
+    async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None) -> None:
         assistant = await self.get_call_engine(chat_id)
         lang = await get_lang(chat_id)
         _ = get_string(lang)
         
-        stream = dynamic_media_stream(path=link, video=bool(video))
+        # تمرير الصورة للدالة الديناميكية
+        stream = dynamic_media_stream(path=link, video=bool(video), image=image)
 
         try:
             await assistant.play(chat_id, stream)
@@ -290,7 +311,7 @@ class Call:
                 if users == 1: autoend[chat_id] = datetime.now() + timedelta(minutes=1)
             except: pass
 
-    # ⚡ دالة التشغيل المحسنة (Optimized Play Logic)
+    # ⚡ دالة التشغيل (Play Logic) - هنا التعديل المهم
     @capture_internal_err
     async def play(self, client, chat_id: int) -> None:
         if isinstance(client, Client): client = await self.get_call_engine(chat_id)
@@ -325,32 +346,36 @@ class Call:
         video = (str(streamtype) == "video")
         
         try:
-            # 1. البدء بالتشغيل فوراً (لتقليل التأخير)
+            # تجهيز الصورة (Thumbnail) لتمريرها في حالة الصوت
+            try:
+                img = await get_thumb(videoid)
+            except:
+                img = config.STREAM_IMG_URL
+
+            # 1. التشغيل (تم إضافة image للأرجومنتس)
             if "live_" in queued:
                 n, link = await YouTube.video(videoid, True)
                 if n == 0: raise Exception("Live Failed")
-                stream = dynamic_media_stream(path=link, video=video)
+                stream = dynamic_media_stream(path=link, video=video, image=img if not video else None)
                 await client.play(chat_id, stream)
             
             elif "vid_" in queued:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
                 try:
-                    # استخدام ملف YouTube.py المحسن (Aria2c)
                     file_path, _ = await YouTube.download(videoid, mystic, videoid=True, video=video)
                 except Exception:
                     await mystic.delete()
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 
-                stream = dynamic_media_stream(path=file_path, video=video)
+                stream = dynamic_media_stream(path=file_path, video=video, image=img if not video else None)
                 await client.play(chat_id, stream)
                 await mystic.delete()
                 
             else:
-                stream = dynamic_media_stream(path=queued, video=video)
+                stream = dynamic_media_stream(path=queued, video=video, image=img if not video else None)
                 await client.play(chat_id, stream)
 
-            # 2. إرسال الصورة والرسالة في الخلفية (Non-blocking Task)
-            # عشان البوت ميتعطلش وهو بيبعت الصورة، بنخليها في التاسك لوحدها
+            # 2. إرسال الرسالة
             asyncio.create_task(self._send_playing_message(original_chat_id, videoid, title, check[0]["dur"], user, video, _, chat_id))
 
         except Exception as e:
@@ -378,7 +403,6 @@ class Call:
                 caption=_["stream_1"].format(link, title[:23], dur, user),
                 reply_markup=InlineKeyboardMarkup(button),
             )
-            # تحديث الداتا بيز بالرسالة الجديدة
             if original_chat_id_for_markup in db:
                 db[original_chat_id_for_markup][0]["mystic"] = run
                 db[original_chat_id_for_markup][0]["markup"] = "tg"
