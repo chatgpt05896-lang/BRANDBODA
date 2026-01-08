@@ -5,6 +5,7 @@ ntgcalls>=2.0.6
 telethon>=1.36.0
 tgcrypto
 pycryptodome
+uvloop>=0.19.0
 
 # --- Database (قواعد البيانات) ---
 motor>=3.4.0
