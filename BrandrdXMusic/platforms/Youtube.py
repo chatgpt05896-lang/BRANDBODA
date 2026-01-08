@@ -178,10 +178,9 @@ class YouTubeAPI:
                 vidid = result["id"]
                 duration_sec = int(time_to_seconds(duration_min)) if duration_min else 0
                 return title, duration_min, duration_sec, thumbnail, vidid
-        except Exception:
-            pass
-        # تصحيح الخطأ: إرجاع قيم فارغة بدلاً من None لتجنب Unpack Error
-        return None, None, 0, None, None
+        except Exception as e:
+            # هنا التعديل: إثارة خطأ بدل إرجاع None عشان البوت ميعملش كراش
+            raise ValueError(f"Details fetch failed: {e}")
 
     async def title(self, link: str, videoid: Union[bool, str] = None):
         if videoid: link = self.base + link
@@ -251,9 +250,9 @@ class YouTubeAPI:
                     "thumb": thumbnail,
                 }
                 return track_details, vidid
-        except Exception: pass
-        # تصحيح الخطأ: إرجاع None, None
-        return None, None
+        except Exception as e:
+            # هنا التعديل المهم جداً
+            raise ValueError(f"Track fetch failed: {e}")
 
     async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid: link = self.base + link
@@ -288,13 +287,15 @@ class YouTubeAPI:
             a = VideosSearch(link, limit=10)
             result = (await a.next()).get("result")
             if not result or len(result) <= query_type:
-                 return None, None, None, None
+                 # تعديل كمان هنا
+                 raise ValueError("Slider index out of range")
             title = result[query_type]["title"]
             duration_min = result[query_type]["duration"]
             vidid = result[query_type]["id"]
             thumbnail = result[query_type]["thumbnails"][0]["url"].split("?")[0]
             return title, duration_min, thumbnail, vidid
-        except Exception: return None, None, None, None
+        except Exception as e:
+            raise ValueError(f"Slider fetch failed: {e}")
 
     async def download(
         self,
