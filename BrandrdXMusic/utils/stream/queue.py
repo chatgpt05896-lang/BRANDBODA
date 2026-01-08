@@ -5,7 +5,6 @@ from BrandrdXMusic.misc import db
 from BrandrdXMusic.utils.formatters import check_duration, seconds_to_min
 from config import autoclean, time_to_seconds
 
-
 async def put_queue(
     chat_id,
     original_chat_id,
@@ -20,9 +19,11 @@ async def put_queue(
 ):
     title = title.title()
     try:
+        # خصم 3 ثواني لضبط التزامن ومنع التقطيع في النهاية
         duration_in_seconds = time_to_seconds(duration) - 3
     except:
         duration_in_seconds = 0
+        
     put = {
         "title": title,
         "dur": duration,
@@ -35,16 +36,23 @@ async def put_queue(
         "seconds": duration_in_seconds,
         "played": 0,
     }
+    
+    # ✅ حماية: التأكد من وجود مفتاح للكراش في الداتا بيز
+    if chat_id not in db:
+        db[chat_id] = []
+
     if forceplay:
         check = db.get(chat_id)
         if check:
             check.insert(0, put)
         else:
-            db[chat_id] = []
             db[chat_id].append(put)
     else:
         db[chat_id].append(put)
-    autoclean.append(file)
+        
+    # إضافة الملف لقائمة التنظيف التلقائي
+    if file not in autoclean:
+        autoclean.append(file)
 
 
 async def put_queue_index(
@@ -58,6 +66,7 @@ async def put_queue_index(
     stream,
     forceplay: Union[bool, str] = None,
 ):
+    # التحقق من الرابط لو ستريم مباشر
     if "20.212.146.162" in vidid:
         try:
             dur = await asyncio.get_event_loop().run_in_executor(
@@ -65,10 +74,11 @@ async def put_queue_index(
             )
             duration = seconds_to_min(dur)
         except:
-            duration = "ᴜʀʟ sᴛʀᴇᴀᴍ"
+            duration = "Unknown"
             dur = 0
     else:
         dur = 0
+        
     put = {
         "title": title,
         "dur": duration,
@@ -80,12 +90,16 @@ async def put_queue_index(
         "seconds": dur,
         "played": 0,
     }
+
+    # ✅ حماية: إنشاء القائمة لو مش موجودة
+    if chat_id not in db:
+        db[chat_id] = []
+
     if forceplay:
         check = db.get(chat_id)
         if check:
             check.insert(0, put)
         else:
-            db[chat_id] = []
             db[chat_id].append(put)
     else:
         db[chat_id].append(put)
