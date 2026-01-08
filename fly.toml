@@ -4,11 +4,9 @@ primary_region = "cdg"
 [build]
   dockerfile = "Dockerfile"
 
-# 🔥 تم حذف قسم [http_service] بالكامل
-# كده Fly هيشغله كـ Worker ومش هيدور على بورت
-
+# 🔥 التغيير هنا: أمر التشغيل بقى run.py
 [processes]
-  app = "python3 -m BrandrdXMusic"
+  app = "python3 run.py"
 
 [[vm]]
   cpu_kind = "shared"
