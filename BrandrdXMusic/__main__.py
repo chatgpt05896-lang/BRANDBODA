@@ -42,23 +42,21 @@ async def init():
     LOGGER("BrandrdXMusic.plugins").info("Successfully Imported Modules...")
     
     await userbot.start()
+    
+    # تشغيل الكلاس الجديد الخاص بالاتصال
     await Hotty.start()
     
-    try:
-        await Hotty.stream_call("https://files.catbox.moe/7lvv4u.jpg")
-    except NoActiveGroupCall:
-        LOGGER("BrandrdXMusic").error("Please turn on videochat...")
-        return
-    except:
-        pass
+    # ⚠️ تم حذف جزء stream_call لأنه غير موجود في الكود الجديد ويسبب كراش
+    # البوت لا يحتاج للانضمام لمكالمة وهمية عند البدء، سيعمل بشكل طبيعي عند طلب أغنية.
     
+    # تفعيل المستمعين للأحداث
     await Hotty.decorators()
     
     print("-------------------------------------------------------")
-    print("🚀 البوت يعمل الآن عبر ملف run.py الخارجي")
+    print("🚀 البوت يعمل الآن بنجاح مع التحديثات الجديدة")
     print("-------------------------------------------------------")
     
-    LOGGER("BrandrdXMusic").info("Bot Started: @S_G0C7")
+    LOGGER("BrandrdXMusic").info(f"Bot Started: @{app.username}")
     
     await idle()
     
@@ -66,6 +64,5 @@ async def init():
     await userbot.stop()
 
 if __name__ == "__main__":
-    # الكود ده مش هيشتغل لو شغلنا عن طريق run.py وده المطلوب
     loop = asyncio.get_event_loop()
     loop.run_until_complete(init())
