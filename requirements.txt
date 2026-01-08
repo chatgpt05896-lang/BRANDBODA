@@ -1,43 +1,79 @@
-https://github.com/KurimuzonAkuma/pyrogram/archive/v2.1.23.zip
-py-tgcalls==1.2.9
-ntgcalls==1.1.2
-telethon==1.36.0
-yt-dlp>=2024.8.6
-youtube-search
-youtube-search-python
-search-engine-parser
-googlesearch-python
-bing-image-downloader
-aiohttp==3.10.11
-aiofiles
-apscheduler
-motor==3.4.0
-pymongo==4.5.0
-pillow==10.4.0
-psutil
-wget
-qrcode
-gTTS
-unidecode
-future==0.14.0
-python-dotenv
-pyyaml==6.0.2
-gitpython
-hachoir
-heroku3
-pykeyboard
-telegraph==2.2.0
-requests
-httpx==0.27.0
+# --- Core System (الأساسيات الجديدة) ---
+# نستخدم Kurigram لأنه أسرع وأحدث من Pyrogram العادي
+kurigram>=2.2.14
+# مكتبات الاتصال الجديدة (V2) عشان الكود اللي كتبناه يشتغل
+py-tgcalls>=2.2.8
+ntgcalls>=2.0.6
+# مكتبة تيليجرام التانية لدعم الإضافات القديمة
+telethon>=1.36.0
+# لتسريع التشفير والاتصال
 tgcrypto
-openai==1.41.0
-lexica-api==1.5.9
-lyricsgenius==3.0.0
-spotipy
-MukeshAPI
-SafoneAPI
-opencv-python-headless==4.10.0.84
-speedtest-cli
-dnspython==2.6.1
+pycryptodome
+
+# --- Database (قواعد البيانات) ---
+motor>=3.4.0
+pymongo>=4.5.0
+
+# --- Media & Downloaders (التحميل والميديا) ---
+# أحدث نسخة من yt-dlp عشان اليوتيوب ما يوقفش
+yt-dlp[default]>=2025.12.8
+# نسخة معدلة للبحث عشان النسخة الرسمية بايظة
+git+https://github.com/CertifiedCoders/youtube-search-python
+youtube-search
+wget
+ffmpeg-python
+pydub
+bing-image-downloader
+
+# --- Network & Requests (الشبكات) ---
+aiohttp>=3.10.11
+aiofiles
+requests
+httpx[http2]>=0.28.1
+bs4
+google-api-python-client
+
+# --- Images & Graphics (الصور والجرافيك) ---
+pillow>=12.0.0
+# نستخدم Headless عشان السيرفرات ما تطلبش واجهة رسومية
+opencv-python-headless
+# مهمين جداً للكتابة بالعربي على الصور
 arabic-reshaper
 python-bidi
+
+# --- APIs & Integration (الربط والخدمات) ---
+heroku3
+telegraph>=2.2.0
+spotipy
+openai>=1.41.0
+lexica-api>=1.5.9
+lyricsgenius>=3.0.0
+MukeshAPI
+SafoneAPI
+deepai
+nekosbest
+
+# --- Utilities (أدوات مساعدة) ---
+psutil
+apscheduler
+gitpython
+python-dotenv
+pyyaml>=6.0.2
+hachoir
+speedtest-cli
+dnspython>=2.6.1
+future
+unidecode
+qrcode
+pykeyboard
+pyshorteners
+python-whois
+pyfiglet
+search-engine-parser
+googlesearch-python
+
+# --- Voice & Speech (الصوت والكلام) ---
+gTTS
+edge-tts
+gpytranslate
+SpeechRecognition
