@@ -1,48 +1,27 @@
 import asyncio
 import importlib
-import os
-from aiohttp import web
+from sys import argv
+from pytgcalls.exceptions import NoActiveGroupCall
 
 # ---------------------------------------------------
-# 🔥 1. تفعيل التيربو (uvloop)
+# 🔥 الترتيب الذهبي: تفعيل التيربو قبل استدعاء البوت
 # ---------------------------------------------------
 try:
     import uvloop
-    uvloop.install()
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except ImportError:
     pass
 # ---------------------------------------------------
 
-from sys import argv
-from pyrogram import idle
-from pytgcalls.exceptions import NoActiveGroupCall
-
+# دلوقتي نستدعي باقي ملفات البوت بأمان
 import config
+from pyrogram import idle
 from BrandrdXMusic import LOGGER, app, userbot
 from BrandrdXMusic.core.call import Hotty
 from BrandrdXMusic.misc import sudo
 from BrandrdXMusic.plugins import ALL_MODULES
 from BrandrdXMusic.utils.database import get_banned_users, get_gbanned
 from config import BANNED_USERS
-
-# ---------------------------------------------------
-# 🌐 2. دالة السيرفر الوهمي (عشان الاستضافة متقفلش البوت)
-# ---------------------------------------------------
-async def web_server():
-    async def handle(request):
-        return web.Response(text="Bot is Running High Speed! 🚀")
-
-    app_web = web.Application()
-    app_web.router.add_get("/", handle)
-    runner = web.AppRunner(app_web)
-    await runner.setup()
-    # استخراج البورت من السيرفر أو استخدام 8080 كافتراضي
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    LOGGER("BrandrdXMusic").info(f"🌐 Web Server Started on Port {port}")
-
-# ---------------------------------------------------
 
 async def init():
     if (
@@ -53,7 +32,7 @@ async def init():
         and not config.STRING5
     ):
         LOGGER(__name__).error("Assistant client variables not defined, exiting...")
-        exit()
+        return
     
     await sudo()
     
@@ -83,18 +62,14 @@ async def init():
         LOGGER("BrandrdXMusic").error(
             "Please turn on the videochat of your log group/channel.\n\nStopping Bot..."
         )
-        exit()
+        return
     except:
         pass
     
     await Hotty.decorators()
-
-    # 🔥 تشغيل السيرفر الوهمي هنا
-    await web_server()
     
-    # ✅ الرسالة العربية
     print("-------------------------------------------------------")
-    print("الـبـوت اشـتـغـل يـ عـزيـزي الـمـطـور @S_G0C7")
+    print("الـبـوت شـغـال بـنـظـام Worker الـسـريـع 🚀 @S_G0C7")
     print("قـنـاة الـتحـديـثـات https://t.me/SourceBoda")
     print("-------------------------------------------------------")
     
@@ -102,12 +77,17 @@ async def init():
     
     await idle()
     
+    # إغلاق نظيف
     await app.stop()
     await userbot.stop()
     LOGGER("BrandrdXMusic").info("Stopping Brandrd Music Bot...")
 
-
 if __name__ == "__main__":
-    # استخدام اللوب الافتراضي لتجنب التضارب
-    loop = asyncio.get_event_loop_policy().get_event_loop()
-    loop.run_until_complete(init())
+    # 🔥 التغليف النهائي: عشان ميبقاش فيه أي أخطاء وقت القفل
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(init())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        LOGGER("BrandrdXMusic").error(f"Stopping due to error: {e}")
