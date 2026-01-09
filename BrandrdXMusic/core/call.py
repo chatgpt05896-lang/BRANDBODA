@@ -1,5 +1,6 @@
 import asyncio
 import os
+import gc  # 🧹 جامع القمامة لتنظيف الرامات
 from datetime import datetime, timedelta
 from typing import Union
 
@@ -15,6 +16,7 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
+# معالجة اختلافات المكتبات لضمان عدم حدوث Import Error
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
@@ -51,41 +53,84 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ SOUND FIX: استخدام OPUS (أفضل جودة وأنقى صوت)
+# 🛡️ نظام الكاش الذكي (Smart Caching System)
+# =======================================================================
+async def delayed_auto_clean(popped_item):
+    """
+    يحافظ على الملف لمدة 5 دقائق (300 ثانية) قبل الحذف.
+    يوفر الباندويث ويسرع التكرار.
+    """
+    try:
+        await asyncio.sleep(300)
+        await auto_clean(popped_item)
+    except:
+        pass
+
+# =======================================================================
+# ☢️ محرك المعالجة الخارق (The God Mode Engine)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStream:
-    # إلغاء إعدادات PCM القديمة واستخدام الإعدادات الافتراضية الذكية
-    # المكتبة هتقوم باختيار أفضل كوديك تلقائياً (Opus)
+    # ⚙️ تجميعة الفلاتر النهائية:
+    # 1. -re: قراءة Input بالسرعة الطبيعية.
+    # 2. -preset ultrafast: معالجة فورية للبدء السريع.
+    # 3. -tune zerolatency: إلغاء التأخير تماماً.
+    # 4. -thread_queue_size 4096: طابور معالج ضخم جداً.
+    # 5. -af "volume=1.6": تضخيم الصوت 60% بنقاء.
+    # 6. -pix_fmt yuv420p: تحسين ألوان الفيديو.
+    # 7. -bufsize 64M: خزان طوارئ ضخم للشبكة.
     
+    god_mode_filters = (
+        '-re '
+        '-preset ultrafast '
+        '-tune zerolatency '
+        '-thread_queue_size 4096 '
+        '-af "volume=1.6" '
+        '-probesize 64M '
+        '-analyzeduration 10000000 '
+        '-max_muxing_queue_size 9999 '
+        '-bufsize 65536k '
+        '-ac 2 '
+        '-ar 48000 '
+        '-pix_fmt yuv420p '
+        '-http_keepalive 1'
+    )
+    
+    final_ffmpeg = f"{ffmpeg} {god_mode_filters}" if ffmpeg else god_mode_filters
+
     if video:
         return MediaStream(
             media_path=path,
-            audio_parameters=AudioQuality.STUDIO,  # جودة استوديو (نقية جداً)
-            video_parameters=VideoQuality.HD_720p,
+            audio_parameters=AudioQuality.STUDIO,    # 🎧 صوت استوديو
+            video_parameters=VideoQuality.FHD_1080p, # 📺 فيديو FHD
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
-            ffmpeg_parameters=ffmpeg,
+            ffmpeg_parameters=final_ffmpeg,
         )
     else:
         return MediaStream(
             media_path=path,
-            audio_parameters=AudioQuality.STUDIO,  # جودة استوديو (نقية جداً)
-            video_parameters=VideoQuality.HD_720p,
+            audio_parameters=AudioQuality.STUDIO,    # 🎧 صوت استوديو
+            video_parameters=VideoQuality.FHD_1080p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.IGNORE,
-            ffmpeg_parameters=ffmpeg,
+            ffmpeg_parameters=final_ffmpeg,
         )
 
 async def _clear_(chat_id: int) -> None:
     try:
         if popped := db.pop(chat_id, None):
-            await auto_clean(popped)
+            # تفعيل الحذف المؤجل
+            asyncio.create_task(delayed_auto_clean(popped))
+        
         await remove_active_video_chat(chat_id)
         await remove_active_chat(chat_id)
         await set_loop(chat_id, 0)
     except:
         pass
+    finally:
+        # 🧹 تنظيف الذاكرة الإجباري (Force Garbage Collection)
+        gc.collect()
 
 # =======================================================================
 # 🚀 CORE CLASS
@@ -123,7 +168,7 @@ class Call:
         return self.pytgcalls_map.get(id(assistant), self.one)
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Studio Quality Engine...")
+        LOGGER(__name__).info("🚀 Starting Ultimate God-Mode Engine...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -215,7 +260,10 @@ class Call:
             else:
                 loop -= 1
                 await set_loop(chat_id, loop)
-            if popped: await auto_clean(popped)
+            
+            if popped: 
+                asyncio.create_task(delayed_auto_clean(popped))
+            
             if not check:
                 await _clear_(chat_id)
                 if chat_id in self.active_calls:
