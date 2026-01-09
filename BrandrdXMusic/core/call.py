@@ -11,7 +11,7 @@ from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
 
 # ============================================================
-# 🛡️ IMPORT SAFETY SYSTEM
+# 🛡️ IMPORT SAFETY SYSTEM (FIXED FOR 2.2.8)
 # ============================================================
 try:
     from pytgcalls import PyTgCalls
@@ -20,13 +20,13 @@ try:
         StreamEnded, ChatUpdate, Update
     )
     from pytgcalls.exceptions import (
-        NoActiveGroupCall, NoAudioSourceFound, NoVideoSourceFound,
-        AlreadyJoined
+        NoActiveGroupCall, NoAudioSourceFound, NoVideoSourceFound
     )
 except ImportError as e:
-    print(f"CRITICAL ERROR: PyTgCalls not installed correctly! {e}")
-    sys.exit(1)
-
+    # If this fails, the bot is broken anyway
+    print(f"CRITICAL ERROR: PyTgCalls import failed! {e}")
+    # We won't exit here to allow logs to show, but functionality will break
+    
 # Fallback for Network Exceptions
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
@@ -61,7 +61,7 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# 🛠️ UTILS & FFMPEG (ENHANCED VALIDATION)
+# 🛠️ UTILS & FFMPEG (ABSOLUTE PATHS + CORRUPTION CHECK)
 # =======================================================================
 
 def get_ffmpeg_flags(live: bool = False) -> str:
@@ -76,7 +76,7 @@ def get_ffmpeg_flags(live: bool = False) -> str:
     )
 
 def build_stream(path: str, video: bool = False, live: bool = False) -> MediaStream:
-    """Builds a MediaStream object safely with ABSOLUTE PATHS & SIZE CHECK."""
+    """Builds a MediaStream object safely with ABSOLUTE PATHS."""
     if not path:
         raise ValueError("Stream Path is Empty!")
     
@@ -122,7 +122,7 @@ async def _safe_clean(chat_id: int):
         gc.collect()
 
 # =======================================================================
-# 🏰 THE FORTRESS ENGINE v3.0 (ARMORED EDITION)
+# 🏰 THE FORTRESS ENGINE v3.1 (STABLE EDITION)
 # =======================================================================
 
 class Call:
@@ -192,7 +192,7 @@ class Call:
                 return client
         return self.clients[0]
 
-    # ================= 🛡️ ROBUST JOIN (ANTI-FLOOD) =================
+    # ================= 🛡️ ROBUST JOIN =================
 
     async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: bool = False, image: str = None):
         client = await self.get_tgcalls(chat_id)
@@ -204,12 +204,16 @@ class Call:
             # 🛡️ PROTECTION: FloodWait Handler
             try:
                 await client.play(chat_id, stream)
-            except AlreadyJoined:
-                LOGGER(__name__).info(f"Already in call {chat_id}, restarting stream...")
             except FloodWait as f:
                 LOGGER(__name__).warning(f"FloodWait detected! Sleeping {f.value}s")
                 await asyncio.sleep(f.value)
                 await client.play(chat_id, stream)
+            except Exception as e:
+                # Ignore "Already Joined" errors manually since we can't import the Exception
+                if "already joined" in str(e).lower():
+                     pass
+                else:
+                    raise e
 
             await asyncio.sleep(1) 
 
@@ -274,8 +278,6 @@ class Call:
             
             if not queued_file or not vidid:
                 LOGGER(__name__).warning(f"Corrupt track data in {chat_id}, skipping...")
-                # Release lock and recurse (conceptually), but better to just stop/next
-                # To avoid recursion depth, we just stop if data bad, or try next via Task
                 return await self.stop_stream(chat_id)
 
             is_video = str(streamtype) == "video"
@@ -287,13 +289,14 @@ class Call:
                     n, link = await YouTube.video(vidid, True)
                     if n == 0:
                         await app.send_message(original_chat_id, "فشل الحصول على رابط البث.")
-                        return # Should try next really
+                        return 
                     final_path = link
                     is_live = True
                 
                 elif "vid_" in queued_file:
                     # 🌟 ABSOLUTE PATH CHECK + CORRUPTION CHECK
                     abs_path = os.path.abspath(queued_file)
+                    # Check if exists AND size > 1KB
                     file_ok = os.path.exists(abs_path) and os.path.getsize(abs_path) > 1024
                     
                     if not file_ok:
@@ -407,7 +410,7 @@ class Call:
         ffmpeg = f"-ss {to_seek} -to {duration}"
         # 🛡️ PROTECTION: Validate file exists before seek
         if not os.path.exists(file_path):
-             return # Fail silently or log
+             return 
         
         if mode == "video":
              stream = MediaStream(file_path, audio_parameters=AudioQuality.STUDIO, video_parameters=VideoQuality.HD_720p, ffmpeg_parameters=ffmpeg)
