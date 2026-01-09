@@ -14,7 +14,7 @@ class Userbot(Client):
             api_id=config.API_ID,
             api_hash=config.API_HASH,
             session_string=str(config.STRING1),
-            no_updates=True, # بيمنع استلام تحديثات الشات لتخفيف الضغط
+            no_updates=True,
         )
         self.two = Client(
             "BrandrdXMusic2",
@@ -46,7 +46,7 @@ class Userbot(Client):
         )
 
     async def start(self):
-        LOGGER(__name__).info("⚡ جاري إقلاع كتيبة المساعدين (الوضع السريع)...")
+        LOGGER(__name__).info("⚡ جـاري إقـلاع كـتـيـبـة الـمـسـاعـديـن...")
         
         clients = [
             (self.one, config.STRING1, 1, "☔"),
@@ -63,7 +63,6 @@ class Userbot(Client):
             try:
                 await client.start()
                 
-                # جلب البيانات
                 me = await client.get_me()
                 client.id = me.id
                 client.name = me.first_name
@@ -73,25 +72,23 @@ class Userbot(Client):
                 assistants.append(index)
                 assistantids.append(me.id)
 
-                # محاولة إرسال رسالة لجروب السجل (بدون إجبار)
                 try:
                     await client.send_message(
                         config.LOGGER_ID, 
-                        f"🚀 تم تفعيل الـمـسـاعـد {index} يا عزيزي {emoji}\n👤 الاسم: {me.mention}"
+                        f"تـم تـفـعـيـل الـمـسـاعـد {index} يـا عـزيـزي {emoji}\n🤍 الأســم : {me.mention}"
                     )
                 except Exception:
-                    LOGGER(__name__).warning(f"⚠️ المساعد {index} شغال بس مش عارف يبعت في جروب السجل (تأكد إنه مشرف).")
+                    LOGGER(__name__).warning(f"الـمـسـاعـد {index} شـغـال بـس مـش عـارف يـبـعـت فـي جـروب الـسـجـل.")
 
-                LOGGER(__name__).info(f"🚀 تم تفعيل الـمـسـاعـد {index} باسم: {client.name}")
-
+                LOGGER(__name__).info(f"تـم تـفـعـيـل الـمـسـاعـد {index} بـاسـم: {client.name}")
+            
             except Exception as e:
-                LOGGER(__name__).error(f"❌ فشل تشغيل المساعد {index}: {e}")
-                # هنا شلت sys.exit عشان لو مساعد واحد بايظ الباقي يكمل شغل
+                LOGGER(__name__).error(f"فـشـل تـشـغـيـل الـمـسـاعـد {index}: {e}")
 
-        LOGGER(__name__).info("✅ تم تشغيل جميع المساعدين المتاحين.")
+        LOGGER(__name__).info(f"تـم تـشـغـيـل {len(assistants)} مـسـاعـديـن بـنـجـاح.")
 
     async def stop(self):
-        LOGGER(__name__).info("🛑 جاري إيقاف المساعدين...")
+        LOGGER(__name__).info("جـاري إيـقـاف الـمـسـاعـديـن...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         try:
             await asyncio.gather(
