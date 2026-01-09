@@ -3,6 +3,15 @@ import os
 from datetime import datetime, timedelta
 from typing import Union
 
+# =======================================================================
+# 🛠️ AGGRESSIVE PATCH: إصلاح المشكلة قبل استدعاء المكتبات
+# =======================================================================
+from pyrogram.types import UpdateGroupCall
+if not hasattr(UpdateGroupCall, "chat_id"):
+    # بنزرع الخاصية دي غصب عشان المكتبة متعملش كراش
+    setattr(UpdateGroupCall, "chat_id", property(lambda self: self.chat.id))
+# =======================================================================
+
 from pyrogram import Client
 from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
@@ -15,7 +24,6 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
-# معالجة استيراد الأخطاء حسب الإصدار
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
@@ -43,7 +51,6 @@ from BrandrdXMusic.utils.stream.autoclear import auto_clean
 from BrandrdXMusic.utils.thumbnails import get_thumb
 from BrandrdXMusic.utils.inline.play import stream_markup
 
-# محاولة استيراد الماركوب الثاني لو موجود
 try:
     from BrandrdXMusic.utils.inline.play import stream_markup2
 except ImportError:
@@ -53,10 +60,17 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ دالة بناء الستريم (تم تحديثها لتتوافق مع الإصدارات الجديدة)
+# ⚙️ SOUND FIX: إجبار الصوت على العمل (Raw Audio)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStream:
+    # إعدادات الصوت السحرية لحل مشكلة "دخل ومفيش صوت"
+    # بنحول الصوت لـ PCM s16le وده الفورمات الخام اللي تليجرام بيفهمه فوراً
+    ffmpeg_audio_flags = "-ac 2 -f s16le -acodec pcm_s16le -ar 48000"
+    
+    # لو فيه بارمترات ffmpeg جاية (زي التقديم)، بنزود عليها فلاتر الصوت
+    final_ffmpeg = f"{ffmpeg} {ffmpeg_audio_flags}" if ffmpeg else ffmpeg_audio_flags
+
     if video:
         return MediaStream(
             media_path=path,
@@ -64,7 +78,7 @@ def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStr
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
-            ffmpeg_parameters=ffmpeg,
+            ffmpeg_parameters=final_ffmpeg,
         )
     else:
         return MediaStream(
@@ -73,7 +87,7 @@ def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStr
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.IGNORE,
-            ffmpeg_parameters=ffmpeg,
+            ffmpeg_parameters=final_ffmpeg,
         )
 
 async def _clear_(chat_id: int) -> None:
@@ -87,7 +101,7 @@ async def _clear_(chat_id: int) -> None:
         pass
 
 # =======================================================================
-# 🚀 كلاس الاتصال الرئيسي (تم إصلاح مشكلة client has no attribute play)
+# 🚀 CORE CLASS
 # =======================================================================
 
 class Call:
@@ -109,7 +123,6 @@ class Call:
 
         self.active_calls = set()
         
-        # 🛠️ الإصلاح الجذري: خريطة لربط اليوزربوت بمشغل الميديا الخاص به
         self.pytgcalls_map = {
             id(self.userbot1): self.one,
             id(self.userbot2): self.two,
@@ -118,13 +131,12 @@ class Call:
             id(self.userbot5): self.five,
         }
 
-    # دالة لجلب مشغل الميديا الصحيح بناءً على الشات
     async def get_tgcalls(self, chat_id: int):
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting BrandrdX Music Engine...")
+        LOGGER(__name__).info("🚀 Starting Engine with Audio Fixes...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -179,11 +191,11 @@ class Call:
             finally: self.active_calls.discard(chat_id)
 
     async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
-        # ⚠️ هنا التعديل المهم: بنجيب العميل الصح عشان ميديناش Error
         client = await self.get_tgcalls(chat_id)
         lang = await get_lang(chat_id)
         _ = get_string(lang)
         
+        # استخدام دالة بناء الستريم الجديدة (مع إصلاح الصوت)
         stream = build_stream(link, video=bool(video))
 
         try:
@@ -209,7 +221,6 @@ class Call:
             except: pass
 
     async def change_stream(self, client, chat_id: int):
-        # ملاحظة: client هنا هو PyTgCalls client جاي من الـ decorator
         check = db.get(chat_id)
         popped = None
         loop = await get_loop(chat_id)
@@ -250,7 +261,6 @@ class Call:
 
         video = True if str(streamtype) == "video" else False
 
-        # دالة مساعدة للأزرار
         def get_btn(vid_id):
             if stream_markup2: return stream_markup2(_, chat_id)
             return stream_markup(_, vid_id, chat_id)
@@ -401,7 +411,7 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # حماية من التحديثات الفارغة التي تسبب خطأ chat_id
+            # حماية ذكية: تجاهل التحديثات الفارغة من خوادم تليجرام
             if not getattr(update, "chat_id", None):
                 return
             
