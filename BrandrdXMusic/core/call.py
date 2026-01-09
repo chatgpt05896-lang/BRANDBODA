@@ -23,9 +23,7 @@ try:
         NoActiveGroupCall, NoAudioSourceFound, NoVideoSourceFound
     )
 except ImportError as e:
-    # If this fails, the bot is broken anyway
     print(f"CRITICAL ERROR: PyTgCalls import failed! {e}")
-    # We won't exit here to allow logs to show, but functionality will break
     
 # Fallback for Network Exceptions
 try:
@@ -61,27 +59,44 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# 🛠️ UTILS & FFMPEG (ABSOLUTE PATHS + CORRUPTION CHECK)
+# 🛠️ UTILS & FFMPEG (SMART FLAGS SYSTEM)
 # =======================================================================
 
-def get_ffmpeg_flags(live: bool = False) -> str:
-    """Returns optimized FFMPEG flags."""
-    return (
-        "-re -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
-        "-reconnect_on_network_error 1 "
-        "-bg 0 "
-        "-max_muxing_queue_size 4096 "
-        "-headers 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)' "
-        f"{'-tune zerolatency -preset ultrafast' if live else '-preset veryfast'}"
-    )
+def get_ffmpeg_flags(is_local: bool = False, live: bool = False) -> str:
+    """
+    Returns optimized FFMPEG flags.
+    Separates logic for LOCAL files vs NETWORK urls to prevent 'NoAudioSourceFound'.
+    """
+    if is_local:
+        # 📂 LOCAL FILE FLAGS: Simple, fast, no network headers
+        return (
+            "-re "
+            "-bg 0 "
+            "-max_muxing_queue_size 4096 "
+            "-preset veryfast "
+            "-vn " # Force Audio Only for stability unless video requested
+        )
+    else:
+        # 🌐 NETWORK URL FLAGS: Robust reconnection logic
+        return (
+            "-re -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+            "-reconnect_on_network_error 1 "
+            "-bg 0 "
+            "-max_muxing_queue_size 4096 "
+            "-headers 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)' "
+            f"{'-tune zerolatency -preset ultrafast' if live else '-preset veryfast'}"
+        )
 
 def build_stream(path: str, video: bool = False, live: bool = False) -> MediaStream:
-    """Builds a MediaStream object safely with ABSOLUTE PATHS."""
+    """Builds a MediaStream object safely with SMART FLAG SELECTION."""
     if not path:
         raise ValueError("Stream Path is Empty!")
     
-    # 🌟 FIX: Convert to Absolute Path if it's a local file
+    is_local = False
+    
+    # 🌟 FIX: Detect Local vs Network
     if not path.startswith("http"):
+        is_local = True
         path = os.path.abspath(path)
         if not os.path.exists(path):
             raise ValueError(f"File not found: {path}")
@@ -89,24 +104,28 @@ def build_stream(path: str, video: bool = False, live: bool = False) -> MediaStr
         if os.path.getsize(path) < 1024: # Less than 1KB
             raise ValueError(f"File is corrupt/empty: {path}")
 
-    flags = get_ffmpeg_flags(live)
+    # Get the CORRECT flags based on source type
+    flags = get_ffmpeg_flags(is_local=is_local, live=live)
     
     if video:
+        # Video Stream
         return MediaStream(
             media_path=path,
             audio_parameters=AudioQuality.STUDIO,
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
+            ffmpeg_parameters=flags, # Explicit flags
+        )
+    else:
+        # Audio Stream (Force Ignore Video Flags for stability)
+        return MediaStream(
+            media_path=path,
+            audio_parameters=AudioQuality.STUDIO,
+            audio_flags=MediaStream.Flags.REQUIRED,
+            video_flags=MediaStream.Flags.IGNORE,
             ffmpeg_parameters=flags,
         )
-    return MediaStream(
-        media_path=path,
-        audio_parameters=AudioQuality.STUDIO,
-        audio_flags=MediaStream.Flags.REQUIRED,
-        video_flags=MediaStream.Flags.IGNORE,
-        ffmpeg_parameters=flags,
-    )
 
 async def _safe_clean(chat_id: int):
     """Safely cleans chat data without crashing."""
@@ -122,7 +141,7 @@ async def _safe_clean(chat_id: int):
         gc.collect()
 
 # =======================================================================
-# 🏰 THE FORTRESS ENGINE v3.1 (STABLE EDITION)
+# 🏰 THE FORTRESS ENGINE v4.0 (INTELLIGENT FFMPEG)
 # =======================================================================
 
 class Call:
@@ -209,7 +228,6 @@ class Call:
                 await asyncio.sleep(f.value)
                 await client.play(chat_id, stream)
             except Exception as e:
-                # Ignore "Already Joined" errors manually since we can't import the Exception
                 if "already joined" in str(e).lower():
                      pass
                 else:
@@ -294,9 +312,8 @@ class Call:
                     is_live = True
                 
                 elif "vid_" in queued_file:
-                    # 🌟 ABSOLUTE PATH CHECK + CORRUPTION CHECK
+                    # 🌟 ABSOLUTE PATH CHECK
                     abs_path = os.path.abspath(queued_file)
-                    # Check if exists AND size > 1KB
                     file_ok = os.path.exists(abs_path) and os.path.getsize(abs_path) > 1024
                     
                     if not file_ok:
@@ -311,7 +328,7 @@ class Call:
                             await msg.edit("❌ فشل التحميل.")
                             return await self.stop_stream(chat_id)
 
-                # Playback with FloodWait Protection
+                # Playback
                 stream = build_stream(final_path, is_video, is_live)
                 try:
                     await client.play(chat_id, stream)
