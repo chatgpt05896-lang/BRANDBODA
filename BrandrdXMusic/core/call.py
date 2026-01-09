@@ -3,15 +3,6 @@ import os
 from datetime import datetime, timedelta
 from typing import Union
 
-# =======================================================================
-# 🛠️ AGGRESSIVE PATCH: إصلاح المشكلة قبل استدعاء المكتبات
-# =======================================================================
-from pyrogram.types import UpdateGroupCall
-if not hasattr(UpdateGroupCall, "chat_id"):
-    # بنزرع الخاصية دي غصب عشان المكتبة متعملش كراش
-    setattr(UpdateGroupCall, "chat_id", property(lambda self: self.chat.id))
-# =======================================================================
-
 from pyrogram import Client
 from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
@@ -24,6 +15,7 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
+# معالجة استيراد الأخطاء حسب الإصدار
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
@@ -51,6 +43,7 @@ from BrandrdXMusic.utils.stream.autoclear import auto_clean
 from BrandrdXMusic.utils.thumbnails import get_thumb
 from BrandrdXMusic.utils.inline.play import stream_markup
 
+# محاولة استيراد الماركوب الثاني لو موجود
 try:
     from BrandrdXMusic.utils.inline.play import stream_markup2
 except ImportError:
@@ -60,16 +53,15 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ SOUND FIX: إجبار الصوت على العمل (Raw Audio)
+# ⚙️ SOUND FIX: إجبار الصوت على العمل (Raw Audio PCM)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStream:
-    # إعدادات الصوت السحرية لحل مشكلة "دخل ومفيش صوت"
-    # بنحول الصوت لـ PCM s16le وده الفورمات الخام اللي تليجرام بيفهمه فوراً
-    ffmpeg_audio_flags = "-ac 2 -f s16le -acodec pcm_s16le -ar 48000"
+    # هذا السطر هو الحل الجذري لمشكلة "المساعد دخل بس مفيش صوت"
+    # بنجبر الصوت يخرج بصيغة RAW PCM
+    ffmpeg_audio = "-ac 2 -f s16le -acodec pcm_s16le -ar 48000"
     
-    # لو فيه بارمترات ffmpeg جاية (زي التقديم)، بنزود عليها فلاتر الصوت
-    final_ffmpeg = f"{ffmpeg} {ffmpeg_audio_flags}" if ffmpeg else ffmpeg_audio_flags
+    final_ffmpeg = f"{ffmpeg} {ffmpeg_audio}" if ffmpeg else ffmpeg_audio
 
     if video:
         return MediaStream(
@@ -123,6 +115,7 @@ class Call:
 
         self.active_calls = set()
         
+        # خريطة الربط: كل يوزربوت مربوط بمشغل الميديا بتاعه
         self.pytgcalls_map = {
             id(self.userbot1): self.one,
             id(self.userbot2): self.two,
@@ -131,6 +124,7 @@ class Call:
             id(self.userbot5): self.five,
         }
 
+    # الدالة المنقذة: بتجيب المشغل الصح بدل اليوزربوت
     async def get_tgcalls(self, chat_id: int):
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
@@ -195,7 +189,6 @@ class Call:
         lang = await get_lang(chat_id)
         _ = get_string(lang)
         
-        # استخدام دالة بناء الستريم الجديدة (مع إصلاح الصوت)
         stream = build_stream(link, video=bool(video))
 
         try:
@@ -411,7 +404,7 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # حماية ذكية: تجاهل التحديثات الفارغة من خوادم تليجرام
+            # تجاهل أي تحديث لا يحتوي على chat_id
             if not getattr(update, "chat_id", None):
                 return
             
