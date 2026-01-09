@@ -1,32 +1,44 @@
-from motor.motor_asyncio import AsyncIOMotorClient as _mongo_client_
+import sys
+from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
-from pyrogram import Client
-
+from pymongo.errors import ServerSelectionTimeoutError
 import config
-
 from ..logging import LOGGER
 
-TEMP_MONGODB = ""
+# =======================================================================
+# 🗄️ MONGODB CONNECTION MANAGER
+# =======================================================================
 
+MONGO_DB_URI = config.MONGO_DB_URI
 
-if config.MONGO_DB_URI is None:
-    LOGGER(__name__).warning("No MONGO DB URL found. LOL")
-    temp_client = Client(
-        "BrandrdXMusic",
-        bot_token=config.BOT_TOKEN,
-        api_id=config.API_ID,
-        api_hash=config.API_HASH,
-    )
-    temp_client.start()
-    info = temp_client.get_me()
-    username = info.username
-    temp_client.stop()
-    _mongo_async_ = _mongo_client_(TEMP_MONGODB)
-    _mongo_sync_ = MongoClient(TEMP_MONGODB)
-    mongodb = _mongo_async_[username]
-    pymongodb = _mongo_sync_[username]
-else:
-    _mongo_async_ = _mongo_client_(config.MONGO_DB_URI)
-    _mongo_sync_ = MongoClient(config.MONGO_DB_URI)
-    mongodb = _mongo_async_.BrandrdXMusic
-    pymongodb = _mongo_sync_.BrandrdXMusic
+# 1. التحقق من وجود رابط القاعدة
+if not MONGO_DB_URI:
+    LOGGER(__name__).error("❌ لم يتم العثور على رابط قاعدة البيانات (MONGO_DB_URI)!")
+    sys.exit(1)
+
+try:
+    # 2. إنشاء الاتصال (Async & Sync) مع مهلة زمنية (Timeout)
+    # لو الاتصال فشل خلال 5 ثواني، البوت هيبلغك بدل ما يعلق
+    _mongo_async_ = AsyncIOMotorClient(MONGO_DB_URI, serverSelectionTimeoutMS=5000)
+    _mongo_sync_ = MongoClient(MONGO_DB_URI, serverSelectionTimeoutMS=5000)
+
+    # 3. اختيار اسم قاعدة البيانات
+    # استخدام اسم ثابت أفضل وأسرع من جلب اسم البوت كل مرة
+    db_name = "BrandrdXMusic" 
+    
+    mongodb = _mongo_async_[db_name]
+    pymongodb = _mongo_sync_[db_name]
+
+    # 4. اختبار الاتصال الفعلي (Ping)
+    # الخطوة دي مهمة عشان نتأكد إن الرابط شغال وصحيح
+    _mongo_sync_.server_info()
+    
+    LOGGER(__name__).info(f"✅ تم الاتصال بقاعدة البيانات بنجاح: {db_name}")
+
+except ServerSelectionTimeoutError:
+    LOGGER(__name__).error("❌ فشل الاتصال بقاعدة البيانات! (تأكد من الرابط أو سماح الـ IP)")
+    sys.exit(1)
+
+except Exception as e:
+    LOGGER(__name__).error(f"❌ حدث خطأ غير متوقع في قاعدة البيانات: {e}")
+    sys.exit(1)
