@@ -56,9 +56,6 @@ counter = {}
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStream:
     # إعدادات FFmpeg القوية لمنع التقطيع وتفعيل الاستيريو
-    # -reconnect 1: إعادة الاتصال التلقائي عند انقطاع البيانات
-    # -reconnect_streamed 1: تحسين تدفق البيانات المباشر
-    # -reconnect_delay_max 5: مهلة 5 ثواني للمحاولة
     # -ac 2: إجبار الصوت يكون ستيريو (قناتين)
     # -ar 48000: جودة صوت 48kHz (نقية جداً)
     
@@ -196,7 +193,6 @@ class Call:
         lang = await get_lang(chat_id)
         _ = get_string(lang)
         
-        # هنا يتم استخدام بناء الستريم الجديد مع مانع التقطيع
         stream = build_stream(link, video=bool(video))
 
         try:
@@ -409,29 +405,33 @@ class Call:
             except: pass
 
     # =======================================================================
-    # 🚨 معالجة التحديثات بشكل منفصل لتجنب الكراش
+    # 🚨 FIX COMPLETE: استخدام on_update العام + فحص chat_id
     # =======================================================================
     async def decorators(self):
         for client in [self.one, self.two, self.three, self.four, self.five]:
             if not client: continue
 
-            @client.on_stream_end()
-            async def on_stream_end(client, update: StreamEnded):
-                try:
-                    await self.change_stream(client, update.chat_id)
-                except Exception as e:
-                    LOGGER(__name__).error(f"Stream End Error: {e}")
+            @client.on_update()
+            async def _handler(client, update):
+                # 1. الحماية من التحديثات التي لا تحتوي على chat_id
+                if not hasattr(update, 'chat_id'):
+                    return
+                
+                chat_id = update.chat_id
 
-            @client.on_closed_voice_chat()
-            async def on_closed_voice_chat(client, update: ChatUpdate):
-                await self.stop_stream(update.chat_id)
-
-            @client.on_kicked()
-            async def on_kicked(client, update: ChatUpdate):
-                await self.stop_stream(update.chat_id)
-
-            @client.on_left()
-            async def on_left(client, update: ChatUpdate):
-                await self.stop_stream(update.chat_id)
+                # 2. معالجة انتهاء المقطع
+                if isinstance(update, StreamEnded):
+                    try:
+                        await self.change_stream(client, chat_id)
+                    except Exception as e:
+                        LOGGER(__name__).error(f"Stream End Error: {e}")
+                
+                # 3. معالجة خروج المساعد أو طرده
+                elif isinstance(update, ChatUpdate):
+                    # التحقق من الحالة في إصدار 2.x
+                    if update.status == ChatUpdate.Status.LEFT_CALL or \
+                       update.status == ChatUpdate.Status.KICKED or \
+                       update.status == ChatUpdate.Status.CLOSED_VOICE_CHAT:
+                        await self.stop_stream(chat_id)
 
 Hotty = Call()
