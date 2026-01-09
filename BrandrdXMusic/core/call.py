@@ -11,7 +11,7 @@ from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
 
 # ============================================================
-# 🛡️ IMPORT SAFETY SYSTEM (FIXED FOR 2.2.8)
+# 🛡️ IMPORT SAFETY SYSTEM
 # ============================================================
 try:
     from pytgcalls import PyTgCalls
@@ -59,30 +59,32 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# 🛠️ UTILS & FFMPEG (SMART FLAGS SYSTEM)
+# 🛠️ UTILS & FFMPEG (AUDIO FIX + FLOOD FIX)
 # =======================================================================
 
 def get_ffmpeg_flags(is_local: bool = False, live: bool = False) -> str:
     """
     Returns optimized FFMPEG flags.
-    Separates logic for LOCAL files vs NETWORK urls to prevent 'NoAudioSourceFound'.
+    Added -ac 2 -ar 48000 to fix NO SOUND issues.
     """
     if is_local:
-        # 📂 LOCAL FILE FLAGS: Simple, fast, no network headers
+        # 📂 LOCAL FILE FLAGS: Force Audio Format for Telegram
         return (
             "-re "
             "-bg 0 "
             "-max_muxing_queue_size 4096 "
+            "-ac 2 -ar 48000 "  # 🌟 FIX: Force Stereo 48kHz (Fixes Silence)
             "-preset veryfast "
-            "-vn " # Force Audio Only for stability unless video requested
+            "-vn " 
         )
     else:
-        # 🌐 NETWORK URL FLAGS: Robust reconnection logic
+        # 🌐 NETWORK URL FLAGS
         return (
             "-re -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
             "-reconnect_on_network_error 1 "
             "-bg 0 "
             "-max_muxing_queue_size 4096 "
+            "-ac 2 -ar 48000 "  # 🌟 FIX: Force Stereo 48kHz
             "-headers 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)' "
             f"{'-tune zerolatency -preset ultrafast' if live else '-preset veryfast'}"
         )
@@ -94,31 +96,26 @@ def build_stream(path: str, video: bool = False, live: bool = False) -> MediaStr
     
     is_local = False
     
-    # 🌟 FIX: Detect Local vs Network
     if not path.startswith("http"):
         is_local = True
         path = os.path.abspath(path)
         if not os.path.exists(path):
             raise ValueError(f"File not found: {path}")
-        # 🛡️ PROTECTION: Check if file is corrupt (too small)
-        if os.path.getsize(path) < 1024: # Less than 1KB
+        if os.path.getsize(path) < 1024:
             raise ValueError(f"File is corrupt/empty: {path}")
 
-    # Get the CORRECT flags based on source type
     flags = get_ffmpeg_flags(is_local=is_local, live=live)
     
     if video:
-        # Video Stream
         return MediaStream(
             media_path=path,
             audio_parameters=AudioQuality.STUDIO,
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
-            ffmpeg_parameters=flags, # Explicit flags
+            ffmpeg_parameters=flags,
         )
     else:
-        # Audio Stream (Force Ignore Video Flags for stability)
         return MediaStream(
             media_path=path,
             audio_parameters=AudioQuality.STUDIO,
@@ -128,7 +125,6 @@ def build_stream(path: str, video: bool = False, live: bool = False) -> MediaStr
         )
 
 async def _safe_clean(chat_id: int):
-    """Safely cleans chat data without crashing."""
     try:
         popped = db.pop(chat_id, None)
         if popped: await auto_clean(popped)
@@ -141,7 +137,7 @@ async def _safe_clean(chat_id: int):
         gc.collect()
 
 # =======================================================================
-# 🏰 THE FORTRESS ENGINE v4.0 (INTELLIGENT FFMPEG)
+# 🏰 THE FORTRESS ENGINE v5.0 (ANTI-FLOOD & SILENCE FIX)
 # =======================================================================
 
 class Call:
@@ -149,7 +145,6 @@ class Call:
         self.active_calls = set()
         self.clients = []
         self.pytgcalls_map = {}
-        # 🛡️ PROTECTION: Locks to prevent Race Conditions
         self.chat_locks: Dict[int, asyncio.Lock] = {}
         self._init_clients()
 
@@ -165,7 +160,6 @@ class Call:
                     pc = PyTgCalls(ub, cache_duration=100)
                     self.clients.append(pc)
                     setattr(self, f"userbot{idx}", ub)
-                    # Mapping helper
                     name = ["one", "two", "three", "four", "five"][idx-1]
                     setattr(self, name, pc)
                 except Exception as e:
@@ -179,15 +173,13 @@ class Call:
     async def run_diagnostics(self):
         LOGGER(__name__).info("🔍 RUNNING SYSTEM DIAGNOSTICS...")
         if not self.clients:
-            LOGGER(__name__).error("❌ No Assistant Clients Loaded! Check config.")
+            LOGGER(__name__).error("❌ No Assistant Clients Loaded!")
         else:
             LOGGER(__name__).info(f"✅ {len(self.clients)} Assistants Loaded.")
             
-        # Check Directories & Permissions
         try:
             if not os.path.exists("downloads"):
                 os.makedirs("downloads")
-            # Test write permissions
             with open("downloads/test.txt", "w") as f: f.write("ok")
             os.remove("downloads/test.txt")
             LOGGER(__name__).info("✅ Downloads Directory: Writable & Ready.")
@@ -215,12 +207,10 @@ class Call:
 
     async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: bool = False, image: str = None):
         client = await self.get_tgcalls(chat_id)
-        
         try:
             is_live = "live" in link or "m3u8" in link
             stream = build_stream(link, video, is_live)
             
-            # 🛡️ PROTECTION: FloodWait Handler
             try:
                 await client.play(chat_id, stream)
             except FloodWait as f:
@@ -228,13 +218,10 @@ class Call:
                 await asyncio.sleep(f.value)
                 await client.play(chat_id, stream)
             except Exception as e:
-                if "already joined" in str(e).lower():
-                     pass
-                else:
-                    raise e
+                if "already joined" in str(e).lower(): pass
+                else: raise e
 
             await asyncio.sleep(1) 
-
             self.active_calls.add(chat_id)
             await add_active_chat(chat_id)
             await music_on(chat_id)
@@ -255,10 +242,9 @@ class Call:
             LOGGER(__name__).error(f"Unknown Join Error: {e}")
             raise AssistantErr(f"خطأ غير متوقع: {e}")
 
-    # ================= 🛡️ ROBUST CHANGE STREAM (LOCKED) =================
+    # ================= 🛡️ ROBUST CHANGE STREAM =================
 
     async def change_stream(self, client, chat_id: int):
-        # 🛡️ PROTECTION: Use Lock to prevent double-skipping
         lock = await self.get_lock(chat_id)
         async with lock:
             try:
@@ -284,7 +270,6 @@ class Call:
                 LOGGER(__name__).error(f"Queue Error: {e}")
                 return await self.stop_stream(chat_id)
 
-            # Data Extraction
             track = check[0]
             queued_file = track.get("file")
             vidid = track.get("vidid")
@@ -295,7 +280,6 @@ class Call:
             duration = track.get("dur", "00:00")
             
             if not queued_file or not vidid:
-                LOGGER(__name__).warning(f"Corrupt track data in {chat_id}, skipping...")
                 return await self.stop_stream(chat_id)
 
             is_video = str(streamtype) == "video"
@@ -312,28 +296,24 @@ class Call:
                     is_live = True
                 
                 elif "vid_" in queued_file:
-                    # 🌟 ABSOLUTE PATH CHECK
                     abs_path = os.path.abspath(queued_file)
                     file_ok = os.path.exists(abs_path) and os.path.getsize(abs_path) > 1024
                     
                     if not file_ok:
                         LOGGER(__name__).info(f"File missing/bad ({abs_path}), attempting re-download.")
-                        msg = await app.send_message(original_chat_id, "🔄 الملف تالف أو مفقود، جاري التحميل...")
+                        msg = await app.send_message(original_chat_id, "🔄 الملف تالف، جاري التحميل...")
                         try:
                             final_path, _ = await YouTube.download(vidid, msg, videoid=True, video=is_video)
                             check[0]["file"] = final_path 
                             await msg.delete()
                         except Exception as e:
-                            LOGGER(__name__).error(f"Redownload failed: {e}")
                             await msg.edit("❌ فشل التحميل.")
                             return await self.stop_stream(chat_id)
 
-                # Playback
                 stream = build_stream(final_path, is_video, is_live)
                 try:
                     await client.play(chat_id, stream)
                 except FloodWait as f:
-                    LOGGER(__name__).warning(f"FloodWait in ChangeStream: {f.value}s")
                     await asyncio.sleep(f.value)
                     await client.play(chat_id, stream)
 
@@ -346,7 +326,7 @@ class Call:
                 except:
                     return await self.stop_stream(chat_id)
 
-            # UI Update
+            # UI Update with FloodWait Protection
             asyncio.create_task(self.safe_send_ui(chat_id, original_chat_id, vidid, title, user, duration, streamtype, is_live))
 
     async def safe_send_ui(self, chat_id, original_chat_id, vidid, title, user, duration, streamtype, is_live):
@@ -369,16 +349,20 @@ class Call:
 
             img = await get_thumb(vidid)
             
-            run = await app.send_photo(
-                chat_id=original_chat_id,
-                photo=img,
-                caption=caption,
-                reply_markup=markup
-            )
-            
-            if chat_id in db:
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
+            # 🛡️ FIX: FLOOD WAIT PROTECTION FOR UI
+            try:
+                run = await app.send_photo(
+                    chat_id=original_chat_id,
+                    photo=img,
+                    caption=caption,
+                    reply_markup=markup
+                )
+                if chat_id in db:
+                    db[chat_id][0]["mystic"] = run
+                    db[chat_id][0]["markup"] = "stream"
+            except FloodWait as f:
+                LOGGER(__name__).warning(f"UI FloodWait: {f.value}s - Skipping UI update.")
+                await asyncio.sleep(f.value) # Just sleep, don't retry to avoid blocking logic
 
         except Exception as e:
             LOGGER(__name__).error(f"UI Error (Ignored): {e}")
@@ -425,9 +409,7 @@ class Call:
     async def seek_stream(self, chat_id, file_path, to_seek, duration, mode):
         client = await self.get_tgcalls(chat_id)
         ffmpeg = f"-ss {to_seek} -to {duration}"
-        # 🛡️ PROTECTION: Validate file exists before seek
-        if not os.path.exists(file_path):
-             return 
+        if not os.path.exists(file_path): return 
         
         if mode == "video":
              stream = MediaStream(file_path, audio_parameters=AudioQuality.STUDIO, video_parameters=VideoQuality.HD_720p, ffmpeg_parameters=ffmpeg)
@@ -477,16 +459,25 @@ class Call:
 
     async def decorators(self):
         async def unified_handler(client, update: Update):
-            if not getattr(update, "chat_id", None): return
-            chat_id = update.chat_id
+            # 🛡️ FIX: IGNORE INVALID UPDATES (Prevent AttributeError)
+            # Only process updates that are strictly StreamEnded or ChatUpdate
+            if not isinstance(update, (StreamEnded, ChatUpdate)):
+                return
 
-            if isinstance(update, StreamEnded):
-                if update.stream_type == StreamEnded.Type.AUDIO:
-                    asyncio.create_task(self.change_stream(client, chat_id))
-            
-            elif isinstance(update, ChatUpdate):
-                if update.status in [ChatUpdate.Status.LEFT_CALL, ChatUpdate.Status.KICKED, ChatUpdate.Status.CLOSED_VOICE_CHAT]:
-                    await self.stop_stream(chat_id)
+            try:
+                # Use getattr safely to avoid crashing on malformed updates
+                chat_id = getattr(update, "chat_id", None)
+                if not chat_id: return
+
+                if isinstance(update, StreamEnded):
+                    if update.stream_type == StreamEnded.Type.AUDIO:
+                        asyncio.create_task(self.change_stream(client, chat_id))
+                
+                elif isinstance(update, ChatUpdate):
+                    if update.status in [ChatUpdate.Status.LEFT_CALL, ChatUpdate.Status.KICKED, ChatUpdate.Status.CLOSED_VOICE_CHAT]:
+                        await self.stop_stream(chat_id)
+            except Exception as e:
+                LOGGER(__name__).error(f"Decorator Error (Ignored): {e}")
 
         for c in self.clients:
             if hasattr(c, 'on_update'): c.on_update()(unified_handler)
