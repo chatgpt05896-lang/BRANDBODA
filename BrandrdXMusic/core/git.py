@@ -1,9 +1,10 @@
 import asyncio
 import shlex
 from typing import Tuple
-from BrandrdXMusic import LOGGER
 
-# --- دالة تسطيب المكتبات (سيبناها زي ما هي عشان لو احتجتها) ---
+# شلنا السطر ده عشان هو سبب المشكلة 👇
+# from BrandrdXMusic import LOGGER
+
 def install_req(cmd: str) -> Tuple[str, str, int, int]:
     async def install_requirements():
         args = shlex.split(cmd)
@@ -22,11 +23,10 @@ def install_req(cmd: str) -> Tuple[str, str, int, int]:
 
     return asyncio.get_event_loop().run_until_complete(install_requirements())
 
-# --- دالة Git المعدلة (عطلناها عشان Fly.io) ---
 def git():
     """
-    تم تعطيل التحديث التلقائي لتجنب أخطاء Git على Fly.io.
-    يتم رفع التحديثات يدوياً عبر 'fly deploy'.
+    نسخة خفيفة جداً لكسر الـ Circular Import
     """
-    LOGGER(__name__).info("✅ Git Update Skipped: Running on Cloud Platform.")
+    # استخدمنا print بدل LOGGER عشان نحل المشكلة
+    print("[INFO] ✅ Git Update Skipped: Running on Cloud Platform.")
     return
