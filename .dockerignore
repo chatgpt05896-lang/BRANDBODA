@@ -1,10 +1,30 @@
+# أهم حاجة عشان الرفع يبقى سريع
+.git
+.git/
+.gitignore
+
+# البيئة الوهمية المحلية (عشان ماتترفعش وتعمل مشاكل)
+venv/
+.venv/
+env/
+
+# ملفات التشغيل واللوج
 .env
-.cache
 log.txt
+error.log
+
+# ملفات النظام المؤقتة
 .DS_Store
+Thumbs.db
+
+# ملفات الجلسات (عشان الأمان)
 *.session
+*.session-journal
+
+# ملفات الكاش والتحميلات
 raw_files/
 cache/
 downloads/
 __pycache__/
-*.session-journal
+*.pyc
+.cache
