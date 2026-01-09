@@ -1,40 +1,56 @@
+import asyncio
+import sys
+from SafoneAPI import SafoneAPI
 from BrandrdXMusic.core.bot import Hotty
 from BrandrdXMusic.core.dir import dirr
 from BrandrdXMusic.core.git import git
 from BrandrdXMusic.core.userbot import Userbot
 from BrandrdXMusic.misc import dbb, heroku
-
-from SafoneAPI import SafoneAPI
 from .logging import LOGGER
 
 # ====================================================
-# 🛠️ SAFE PATCH: حماية إضافية لخاصية Chat ID
+# 🚀 PERFORMANCE BOOST: تفعيل UVLOOP (من Alexa)
 # ====================================================
-# هذا الجزء يضمن عدم توقف البوت حتى لو المكتبة اختلفت قليلاً
+# بيخلي استجابة البوت أسرع بكتير على سيرفرات لينكس وهيروكو
+if sys.platform != "win32":
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+        LOGGER(__name__).info("✅ UVLOOP Enabled: Performance Optimized.")
+    except ImportError:
+        LOGGER(__name__).warning("⚠️ Uvloop not found, falling back to default loop.")
+
+# ====================================================
+# 🛠️ SAFE PATCH: حماية إضافية للكراش (من سورس ديف)
+# ====================================================
+# بيمنع كراش AttributeError في المكتبات القديمة
 try:
-    # محاولة استيراد الأنواع القديمة إذا وجدت
     from pytgcalls.types import UpdateGroupCall
     if not hasattr(UpdateGroupCall, "chat_id"):
         UpdateGroupCall.chat_id = property(lambda self: getattr(getattr(self, "chat", None), "id", 0))
 except ImportError:
-    # إذا لم تكن موجودة (في الإصدارات الحديثة)، نتجاهل الأمر لأننا عالجناه في call.py
     pass
 except Exception:
     pass
 
-# تهيئة المجلدات وقاعدة البيانات
-dirr()
-git()
-dbb()
-heroku()
+# ====================================================
+# 📂 INITIALIZATION: تهيئة النظام
+# ====================================================
+dirr()   # تنظيف المجلدات
+git()    # فحص التحديثات
+dbb()    # قاعدة البيانات
+heroku() # إعدادات هيروكو
 
-# تعريف الكائنات الأساسية
-# ملاحظة: Hotty هنا هو كلاس البوت (Bot Client) الموجود في core/bot.py
+# ====================================================
+# 🤖 CLIENTS: تشغيل العملاء
+# ====================================================
 app = Hotty()
 userbot = Userbot()
 api = SafoneAPI()
 
-# منصات التشغيل
+# ====================================================
+# 🎵 PLATFORMS: منصات التشغيل
+# ====================================================
 from .platforms import *
 
 Apple = AppleAPI()
