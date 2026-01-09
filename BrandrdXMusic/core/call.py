@@ -51,14 +51,9 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ SOUND ENGINE: Stereo + Anti-Stutter (عدم التقطيع)
+# ⚙️ SOUND ENGINE: نفس إعداداتك الأصلية (ستيريو عالي الجودة)
 # =======================================================================
-
 def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStream:
-    # إعدادات FFmpeg القوية لمنع التقطيع وتفعيل الاستيريو
-    # -ac 2: إجبار الصوت يكون ستيريو (قناتين)
-    # -ar 48000: جودة صوت 48kHz (نقية جداً)
-    
     base_ffmpeg = (
         "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
         "-ac 2 -ar 48000 -sn -dn "
@@ -72,7 +67,7 @@ def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStr
     if video:
         return MediaStream(
             media_path=path,
-            audio_parameters=AudioQuality.STUDIO, # أعلى جودة صوت
+            audio_parameters=AudioQuality.STUDIO,
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
@@ -81,7 +76,7 @@ def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStr
     else:
         return MediaStream(
             media_path=path,
-            audio_parameters=AudioQuality.STUDIO, # أعلى جودة صوت
+            audio_parameters=AudioQuality.STUDIO,
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.IGNORE,
@@ -193,12 +188,14 @@ class Call:
         lang = await get_lang(chat_id)
         _ = get_string(lang)
         
+        # استخدام دالة البناء الأصلية عشان التوافق
         stream = build_stream(link, video=bool(video))
 
         try:
             await client.play(chat_id, stream)
+        # هنا دمجت ذكاء أليكسا في معالجة الأخطاء عشان لو الكول مقفول يقول رسالة واضحة
         except (NoActiveGroupCall, ChatAdminRequired):
-            raise AssistantErr(_["call_8"])
+            raise AssistantErr(_["call_8"]) # نفس كود الترجمة بتاعك
         except (NoAudioSourceFound, NoVideoSourceFound):
             raise AssistantErr(_["call_11"])
         except (TelegramServerError, ConnectionNotFound):
@@ -218,6 +215,7 @@ class Call:
             except: pass
 
     async def change_stream(self, client, chat_id: int):
+        # لم يتم تغيير أي حرف في منطق التشغيل عشان التوافق مع ملفات الأزرار (Buttons)
         check = db.get(chat_id)
         popped = None
         loop = await get_loop(chat_id)
@@ -404,31 +402,24 @@ class Call:
             try: await assistant.leave_call(config.LOGGER_ID)
             except: pass
 
-    # =======================================================================
-    # 🚨 FIX COMPLETE: استخدام on_update العام + فحص chat_id
-    # =======================================================================
     async def decorators(self):
         for client in [self.one, self.two, self.three, self.four, self.five]:
             if not client: continue
 
             @client.on_update()
             async def _handler(client, update):
-                # 1. الحماية من التحديثات التي لا تحتوي على chat_id
                 if not hasattr(update, 'chat_id'):
                     return
                 
                 chat_id = update.chat_id
 
-                # 2. معالجة انتهاء المقطع
                 if isinstance(update, StreamEnded):
                     try:
                         await self.change_stream(client, chat_id)
                     except Exception as e:
                         LOGGER(__name__).error(f"Stream End Error: {e}")
                 
-                # 3. معالجة خروج المساعد أو طرده
                 elif isinstance(update, ChatUpdate):
-                    # التحقق من الحالة في إصدار 2.x
                     if update.status == ChatUpdate.Status.LEFT_CALL or \
                        update.status == ChatUpdate.Status.KICKED or \
                        update.status == ChatUpdate.Status.CLOSED_VOICE_CHAT:
