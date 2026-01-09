@@ -8,26 +8,33 @@ from SafoneAPI import SafoneAPI
 from .logging import LOGGER
 
 # ====================================================
-# 🛠️ PATCH START: إصلاح مشكلة chat_id في المكتبة
+# 🛠️ SAFE PATCH: حماية إضافية لخاصية Chat ID
 # ====================================================
+# هذا الجزء يضمن عدم توقف البوت حتى لو المكتبة اختلفت قليلاً
 try:
+    # محاولة استيراد الأنواع القديمة إذا وجدت
     from pytgcalls.types import UpdateGroupCall
-    # بنضيف الخاصية دي يدوياً قبل ما البوت يشتغل
     if not hasattr(UpdateGroupCall, "chat_id"):
         UpdateGroupCall.chat_id = property(lambda self: getattr(getattr(self, "chat", None), "id", 0))
-except:
+except ImportError:
+    # إذا لم تكن موجودة (في الإصدارات الحديثة)، نتجاهل الأمر لأننا عالجناه في call.py
     pass
-# ====================================================
+except Exception:
+    pass
 
+# تهيئة المجلدات وقاعدة البيانات
 dirr()
 git()
 dbb()
 heroku()
 
+# تعريف الكائنات الأساسية
+# ملاحظة: Hotty هنا هو كلاس البوت (Bot Client) الموجود في core/bot.py
 app = Hotty()
 userbot = Userbot()
 api = SafoneAPI()
 
+# منصات التشغيل
 from .platforms import *
 
 Apple = AppleAPI()
