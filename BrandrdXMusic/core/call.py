@@ -15,7 +15,6 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
-# معالجة استيراد الأخطاء حسب الإصدار
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
@@ -43,7 +42,6 @@ from BrandrdXMusic.utils.stream.autoclear import auto_clean
 from BrandrdXMusic.utils.thumbnails import get_thumb
 from BrandrdXMusic.utils.inline.play import stream_markup
 
-# محاولة استيراد الماركوب الثاني لو موجود
 try:
     from BrandrdXMusic.utils.inline.play import stream_markup2
 except ImportError:
@@ -53,33 +51,30 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ SOUND FIX: إجبار الصوت على العمل (Raw Audio PCM)
+# ⚙️ SOUND FIX: استخدام OPUS (أفضل جودة وأنقى صوت)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None) -> MediaStream:
-    # هذا السطر هو الحل الجذري لمشكلة "المساعد دخل بس مفيش صوت"
-    # بنجبر الصوت يخرج بصيغة RAW PCM
-    ffmpeg_audio = "-ac 2 -f s16le -acodec pcm_s16le -ar 48000"
+    # إلغاء إعدادات PCM القديمة واستخدام الإعدادات الافتراضية الذكية
+    # المكتبة هتقوم باختيار أفضل كوديك تلقائياً (Opus)
     
-    final_ffmpeg = f"{ffmpeg} {ffmpeg_audio}" if ffmpeg else ffmpeg_audio
-
     if video:
         return MediaStream(
             media_path=path,
-            audio_parameters=AudioQuality.HIGH,
+            audio_parameters=AudioQuality.STUDIO,  # جودة استوديو (نقية جداً)
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.REQUIRED,
-            ffmpeg_parameters=final_ffmpeg,
+            ffmpeg_parameters=ffmpeg,
         )
     else:
         return MediaStream(
             media_path=path,
-            audio_parameters=AudioQuality.HIGH,
+            audio_parameters=AudioQuality.STUDIO,  # جودة استوديو (نقية جداً)
             video_parameters=VideoQuality.HD_720p,
             audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.IGNORE,
-            ffmpeg_parameters=final_ffmpeg,
+            ffmpeg_parameters=ffmpeg,
         )
 
 async def _clear_(chat_id: int) -> None:
@@ -115,7 +110,6 @@ class Call:
 
         self.active_calls = set()
         
-        # خريطة الربط: كل يوزربوت مربوط بمشغل الميديا بتاعه
         self.pytgcalls_map = {
             id(self.userbot1): self.one,
             id(self.userbot2): self.two,
@@ -124,13 +118,12 @@ class Call:
             id(self.userbot5): self.five,
         }
 
-    # الدالة المنقذة: بتجيب المشغل الصح بدل اليوزربوت
     async def get_tgcalls(self, chat_id: int):
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Engine with Audio Fixes...")
+        LOGGER(__name__).info("🚀 Starting Studio Quality Engine...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -404,7 +397,6 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # تجاهل أي تحديث لا يحتوي على chat_id
             if not getattr(update, "chat_id", None):
                 return
             
