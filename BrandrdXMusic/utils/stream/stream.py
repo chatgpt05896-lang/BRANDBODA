@@ -1,8 +1,10 @@
 import os
+import asyncio
 from random import randint
 from typing import Union
 
 from pyrogram.types import InlineKeyboardMarkup
+from pyrogram.errors import FloodWait
 
 import config
 from BrandrdXMusic import Carbon, YouTube, app
@@ -22,6 +24,13 @@ from BrandrdXMusic.utils.inline import (
 from BrandrdXMusic.utils.pastebin import HottyBin
 from BrandrdXMusic.utils.stream.queue import put_queue, put_queue_index
 from BrandrdXMusic.utils.thumbnails import gen_thumb
+
+# دالة مساعدة لحذف الرسايل بأمان (إضافة مفيدة)
+async def safe_delete(message):
+    try:
+        await message.delete()
+    except:
+        pass
 
 async def stream(
     _,
@@ -116,26 +125,42 @@ async def stream(
                 img = await gen_thumb(vidid, user_id)
                 button = stream_markup(_, vidid, chat_id)
                 
-                # حذف رسالة الانتظار
-                try: await mystic.delete()
-                except: pass
+                # استبدال الحذف اليدوي بالحذف الآمن
+                await safe_delete(mystic)
 
-                run = await app.send_photo(
-                    original_chat_id,
-                    photo=img,
-                    caption=_["stream_1"].format(
-                        f"https://t.me/{app.username}?start=info_{vidid}",
-                        title[:18],
-                        duration_min,
-                        user_name,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
-                )
-                
+                # حماية ضد FloodWait أثناء إرسال الصورة
                 try:
+                    run = await app.send_photo(
+                        original_chat_id,
+                        photo=img,
+                        caption=_["stream_1"].format(
+                            f"https://t.me/{app.username}?start=info_{vidid}",
+                            title[:18],
+                            duration_min,
+                            user_name,
+                        ),
+                        reply_markup=InlineKeyboardMarkup(button),
+                    )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
-                except: pass
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    # إعادة المحاولة بعد الانتظار
+                    run = await app.send_photo(
+                        original_chat_id,
+                        photo=img,
+                        caption=_["stream_1"].format(
+                            f"https://t.me/{app.username}?start=info_{vidid}",
+                            title[:18],
+                            duration_min,
+                            user_name,
+                        ),
+                        reply_markup=InlineKeyboardMarkup(button),
+                    )
+                    db[chat_id][0]["mystic"] = run
+                    db[chat_id][0]["markup"] = "stream"
+                except Exception:
+                    pass
 
         if count == 0:
             return
@@ -187,6 +212,8 @@ async def stream(
             img = await gen_thumb(vidid, user_id)
             position = len(db.get(chat_id)) - 1
             button = aq_markup(_, chat_id)
+            
+            await safe_delete(mystic)
             await app.send_photo(
                 chat_id=original_chat_id,
                 photo=img,
@@ -222,26 +249,38 @@ async def stream(
             img = await gen_thumb(vidid, user_id)
             button = stream_markup(_, vidid, chat_id)
             
-            # حذف رسالة الانتظار
-            try: await mystic.delete()
-            except: pass
-
-            run = await app.send_photo(
-                original_chat_id,
-                photo=img,
-                caption=_["stream_1"].format(
-                    f"https://t.me/{app.username}?start=info_{vidid}",
-                    title[:18],
-                    duration_min,
-                    user_name,
-                ),
-                reply_markup=InlineKeyboardMarkup(button),
-            )
+            await safe_delete(mystic)
 
             try:
+                run = await app.send_photo(
+                    original_chat_id,
+                    photo=img,
+                    caption=_["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{vidid}",
+                        title[:18],
+                        duration_min,
+                        user_name,
+                    ),
+                    reply_markup=InlineKeyboardMarkup(button),
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
-            except: pass
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                run = await app.send_photo(
+                    original_chat_id,
+                    photo=img,
+                    caption=_["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{vidid}",
+                        title[:18],
+                        duration_min,
+                        user_name,
+                    ),
+                    reply_markup=InlineKeyboardMarkup(button),
+                )
+                db[chat_id][0]["mystic"] = run
+                db[chat_id][0]["markup"] = "stream"
+            except Exception: pass
 
     # --- ساوند كلاود (SoundCloud) ---
     elif streamtype == "soundcloud":
@@ -284,24 +323,22 @@ async def stream(
                 "audio",
                 forceplay=forceplay,
             )
-            # تم التوحيد لتفادي الأخطاء
             button = stream_markup(_, "None", chat_id)
             
-            try: await mystic.delete()
-            except: pass
+            await safe_delete(mystic)
 
-            run = await app.send_photo(
-                original_chat_id,
-                photo=config.SOUNCLOUD_IMG_URL,
-                caption=_["stream_1"].format(
-                    config.SUPPORT_CHAT, title[:23], duration_min, user_name
-                ),
-                reply_markup=InlineKeyboardMarkup(button),
-            )
             try:
+                run = await app.send_photo(
+                    original_chat_id,
+                    photo=config.SOUNCLOUD_IMG_URL,
+                    caption=_["stream_1"].format(
+                        config.SUPPORT_CHAT, title[:23], duration_min, user_name
+                    ),
+                    reply_markup=InlineKeyboardMarkup(button),
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
-            except: pass
+            except Exception: pass
 
     # --- تيليجرام (Telegram Files) ---
     elif streamtype == "telegram":
@@ -348,22 +385,20 @@ async def stream(
             if is_video:
                 await add_active_video_chat(chat_id)
             
-            # تم التوحيد
             button = stream_markup(_, "None", chat_id)
             
-            try: await mystic.delete()
-            except: pass
+            await safe_delete(mystic)
 
-            run = await app.send_photo(
-                original_chat_id,
-                photo=config.TELEGRAM_VIDEO_URL if is_video else config.TELEGRAM_AUDIO_URL,
-                caption=_["stream_1"].format(link, title[:23], duration_min, user_name),
-                reply_markup=InlineKeyboardMarkup(button),
-            )
             try:
+                run = await app.send_photo(
+                    original_chat_id,
+                    photo=config.TELEGRAM_VIDEO_URL if is_video else config.TELEGRAM_AUDIO_URL,
+                    caption=_["stream_1"].format(link, title[:23], duration_min, user_name),
+                    reply_markup=InlineKeyboardMarkup(button),
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
-            except: pass
+            except Exception: pass
 
     # --- بث مباشر (Live) ---
     elif streamtype == "live":
@@ -422,24 +457,23 @@ async def stream(
             img = await gen_thumb(vidid, user_id)
             button = stream_markup(_, vidid, chat_id)
             
-            try: await mystic.delete()
-            except: pass
+            await safe_delete(mystic)
 
-            run = await app.send_photo(
-                original_chat_id,
-                photo=img,
-                caption=_["stream_1"].format(
-                    f"https://t.me/{app.username}?start=info_{vidid}",
-                    title[:23],
-                    duration_min,
-                    user_name,
-                ),
-                reply_markup=InlineKeyboardMarkup(button),
-            )
             try:
+                run = await app.send_photo(
+                    original_chat_id,
+                    photo=img,
+                    caption=_["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{vidid}",
+                        title[:23],
+                        duration_min,
+                        user_name,
+                    ),
+                    reply_markup=InlineKeyboardMarkup(button),
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
-            except: pass
+            except Exception: pass
 
     # --- روابط خارجية (Index/M3u8) ---
     elif streamtype == "index":
@@ -486,16 +520,15 @@ async def stream(
             )
             button = stream_markup(_, "None", chat_id)
             
-            try: await mystic.delete()
-            except: pass
+            await safe_delete(mystic)
 
-            run = await app.send_photo(
-                original_chat_id,
-                photo=config.STREAM_IMG_URL,
-                caption=_["stream_2"].format(user_name),
-                reply_markup=InlineKeyboardMarkup(button),
-            )
             try:
+                run = await app.send_photo(
+                    original_chat_id,
+                    photo=config.STREAM_IMG_URL,
+                    caption=_["stream_2"].format(user_name),
+                    reply_markup=InlineKeyboardMarkup(button),
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
-            except: pass
+            except Exception: pass
