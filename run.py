@@ -1,20 +1,29 @@
 import asyncio
-import os
+import sys
 
 # ---------------------------------------------------
-# 🔥 1. هنا السر: تفعيل التيربو قبل ما البوت يصحى
+# 🔒 0. باتش pytgcalls (لازم ييجي الأول)
 # ---------------------------------------------------
 try:
-    import uvloop
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    print("✅ UVLOOP Started Successfully!")
-except ImportError:
-    print("⚠️ UVLOOP not found, using default asyncio.")
-# ---------------------------------------------------
+    from BrandrdXMusic.core import pytgcalls_patch  # noqa
+except Exception as e:
+    print(f"⚠️ pytgcalls patch load skipped: {e}")
 
-# بعد ما جهزنا التيربو، دلوقتي نستدعي البوت بأمان
+# ---------------------------------------------------
+# 🚀 1. تفعيل UVLOOP (بعد الباتش)
+# ---------------------------------------------------
+if sys.platform != "win32":
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+        print("✅ UVLOOP Started Successfully!")
+    except ImportError:
+        print("⚠️ UVLOOP not found, using default asyncio.")
+
+# ---------------------------------------------------
+# 🤖 2. تشغيل البوت
+# ---------------------------------------------------
 from BrandrdXMusic.__main__ import init
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(init())
+    asyncio.run(init())
