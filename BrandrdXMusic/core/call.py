@@ -9,17 +9,28 @@ from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
 
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, AudioQuality, VideoQuality, StreamEnded, ChatUpdate, Update
+from pytgcalls.types import (
+    MediaStream, 
+    AudioQuality, 
+    VideoQuality, 
+    StreamEnded, 
+    ChatUpdate, 
+    Update,
+    GroupCallConfig
+)
 from pytgcalls.exceptions import (
     NoActiveGroupCall,
     NoAudioSourceFound,
     NoVideoSourceFound
 )
 
+# محاولة استيراد الاستثناءات حسب إصدار المكتبة
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
-    from ntgcalls import TelegramServerError, ConnectionNotFound
+    # Fallback للإصدارات القديمة أو المعدلة
+    class TelegramServerError(Exception): pass
+    class ConnectionNotFound(Exception): pass
 
 import config
 from strings import get_string
@@ -52,29 +63,31 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# 🗂️ SMART CACHE SYSTEM (STABLE)
+# 🗂️ 1. SMART CACHE SYSTEM (Fixed Duration & Path)
 # =======================================================================
 
 class SmartCache:
     def __init__(self):
         self.cache: Dict[str, Dict] = {}
-        self.ttl = 420  # 7 Minutes
+        self.ttl = 420  # 7 Minutes as requested
 
     def get(self, video_id: str) -> str:
         self.cleanup()
         if video_id in self.cache:
             entry = self.cache[video_id]
+            # التأكد من وجود الملف فعلياً
             if time.time() - entry['timestamp'] < self.ttl:
                 if os.path.exists(entry['path']):
                     return entry['path']
         return None
 
     def store(self, video_id: str, path: str):
-        if path and os.path.exists(path):
-            self.cache[video_id] = {
-                'path': os.path.abspath(path),
-                'timestamp': time.time()
-            }
+        # تخزين المسار المطلق دائماً لتجنب مشاكل المسارات النسبية
+        abs_path = os.path.abspath(path)
+        self.cache[video_id] = {
+            'path': abs_path,
+            'timestamp': time.time()
+        }
 
     def cleanup(self):
         now = time.time()
@@ -92,63 +105,61 @@ class SmartCache:
 music_cache = SmartCache()
 
 # =======================================================================
-# ⚙️ STREAM CONFIGURATION & FFmpeg
+# ⚙️ 2. FFmpeg & STREAM CONFIGURATION (Studio Quality)
 # =======================================================================
 
+# إعدادات الروابط الخارجية (Live/URL) مع منع التقطيع
 REMOTE_FFMPEG = (
-    "-re "
     "-reconnect 1 "
     "-reconnect_streamed 1 "
     "-reconnect_delay_max 5 "
+    "-probesize 32M "       # حجم متوسط لضمان التحليل الجيد وسرعة البدء
+    "-analyzeduration 10M " # مدة تحليل متوسطة
+    "-ac 2 "                # Stereo حقيقي
+    "-ar 48000 "            # جودة صوت عالية
     "-nostdin "
-    "-ac 2 "
-    "-ar 48000 "
-    "-fflags +discardcorrupt "
-    "-analyzeduration 15000000 "
-    "-probesize 15000000 "
+    "-fflags nobuffer "
+    "-flags low_delay "
     "-loglevel error"
 )
 
+# إعدادات الملفات المحلية
 LOCAL_FFMPEG = (
-    "-nostdin "
     "-ac 2 "
     "-ar 48000 "
-    "-fflags +fastseek "
+    "-nostdin "
+    "-fflags nobuffer "
+    "-flags low_delay "
     "-loglevel error"
 )
 
-def get_video_quality(duration_seconds: int = 0, is_live: bool = False) -> VideoQuality:
-    if is_live:
-        return VideoQuality.HD_720p
-    if duration_seconds > 600: 
-        return VideoQuality.HD_720p
-    return VideoQuality.FHD_1080p
-
-def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
+def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0, quality_mode: str = "studio") -> MediaStream:
     is_url = path.startswith("http")
     base_ffmpeg = REMOTE_FFMPEG if is_url else LOCAL_FFMPEG
     
     combined_ffmpeg = f"{base_ffmpeg} {ffmpeg}" if ffmpeg else base_ffmpeg
 
-    audio_params = AudioQuality.HIGH 
+    # تحديد جودة الصوت ديناميكياً
+    if quality_mode == "studio":
+        audio_params = AudioQuality.STUDIO
+    else:
+        audio_params = AudioQuality.HIGH
     
+    # تحديد جودة الفيديو
+    video_params = VideoQuality.HD_720p if (is_url or duration > 600) else VideoQuality.FHD_1080p
+
     if video:
-        video_params = get_video_quality(duration, is_live=is_url)
         return MediaStream(
             media_path=path,
             audio_parameters=audio_params,
             video_parameters=video_params,
-            audio_flags=MediaStream.Flags.REQUIRED,
-            video_flags=MediaStream.Flags.REQUIRED,
             ffmpeg_parameters=combined_ffmpeg,
         )
     else:
         return MediaStream(
             media_path=path,
             audio_parameters=audio_params,
-            video_parameters=VideoQuality.HD_720p,
-            audio_flags=MediaStream.Flags.REQUIRED,
-            video_flags=MediaStream.Flags.IGNORE,
+            video_flags=MediaStream.Flags.IGNORE, # تعطيل الفيديو لتوفير الباندويث
             ffmpeg_parameters=combined_ffmpeg,
         )
 
@@ -163,7 +174,7 @@ async def _clear_(chat_id: int) -> None:
         pass
 
 # =======================================================================
-# 🚀 CORE CLASS
+# 🚀 3. CORE CLASS (With Fallback Mechanism)
 # =======================================================================
 
 class Call:
@@ -197,8 +208,24 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
+    # دالة ذكية للتشغيل الآمن مع الـ Fallback
+    async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
+        # المحاولة الأولى: Studio Quality
+        try:
+            stream = build_stream(path, video, ffmpeg, duration_sec, quality_mode="studio")
+            await client.play(chat_id, stream)
+        except Exception as e:
+            LOGGER(__name__).warning(f"Studio Quality Failed for {chat_id}, falling back to HIGH. Error: {e}")
+            # المحاولة الثانية: High Quality (Fallback)
+            try:
+                stream = build_stream(path, video, ffmpeg, duration_sec, quality_mode="high")
+                await client.play(chat_id, stream)
+            except Exception as final_e:
+                LOGGER(__name__).error(f"FATAL: All streams failed for {chat_id}. Error: {final_e}")
+                raise final_e
+
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Advanced Music Engine...")
+        LOGGER(__name__).info("🚀 Starting Studio Audio Engine...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -260,10 +287,10 @@ class Call:
         if not link.startswith("http"):
             link = os.path.abspath(link)
 
-        stream = build_stream(link, video=bool(video))
-
         try:
-            await client.play(chat_id, stream)
+            # نستخدم الدالة الآمنة هنا
+            await self._play_stream_safe(client, chat_id, link, bool(video))
+            
         except (NoActiveGroupCall, ChatAdminRequired):
             raise AssistantErr(_["call_8"])
         except (NoAudioSourceFound, NoVideoSourceFound):
@@ -341,8 +368,7 @@ class Call:
                 n, link = await YouTube.video(videoid, True)
                 if n == 0: return await app.send_message(original_chat_id, text=_["call_6"])
 
-                stream = build_stream(link, video, duration=0) 
-                await client.play(chat_id, stream)
+                await self._play_stream_safe(client, chat_id, link, video, 0)
                 
                 img = await get_thumb(videoid)
                 run = await app.send_photo(
@@ -366,8 +392,7 @@ class Call:
                     except: 
                         return await mystic.edit_text(_["call_6"])
                 
-                stream = build_stream(file_path, video, duration=duration_sec)
-                await client.play(chat_id, stream)
+                await self._play_stream_safe(client, chat_id, file_path, video, duration_sec)
 
                 img = await get_thumb(videoid)
                 await mystic.delete()
@@ -381,8 +406,7 @@ class Call:
                 db[chat_id][0]["markup"] = "stream"
 
             elif "index_" in queued:
-                stream = build_stream(videoid, video, duration=duration_sec)
-                await client.play(chat_id, stream)
+                await self._play_stream_safe(client, chat_id, videoid, video, duration_sec)
 
                 run = await app.send_photo(
                     chat_id=original_chat_id,
@@ -394,8 +418,7 @@ class Call:
                 db[chat_id][0]["markup"] = "tg"
 
             else:
-                stream = build_stream(queued, video, duration=duration_sec)
-                await client.play(chat_id, stream)
+                await self._play_stream_safe(client, chat_id, queued, video, duration_sec)
 
                 if videoid == "telegram":
                     img = config.TELEGRAM_AUDIO_URL if str(streamtype) == "audio" else config.TELEGRAM_VIDEO_URL
@@ -441,6 +464,7 @@ class Call:
         except Exception as e:
             LOGGER(__name__).error(f"Play Error: {e}")
             try:
+                # Zero-Downtime: الانتقال الفوري للتالي عند الخطأ
                 await self.change_stream(client, chat_id)
             except:
                 pass
@@ -449,15 +473,14 @@ class Call:
         client = await self.get_tgcalls(chat_id)
         if not link.startswith("http"):
             link = os.path.abspath(link)
-        stream = build_stream(link, video=bool(video))
-        await client.play(chat_id, stream)
+        # استخدام نفس آلية الـ Fallback هنا أيضاً
+        await self._play_stream_safe(client, chat_id, link, bool(video))
 
     async def seek_stream(self, chat_id, file_path, to_seek, duration, mode):
         client = await self.get_tgcalls(chat_id)
         file_path = os.path.abspath(file_path)
         ffmpeg = f"-ss {to_seek} -to {duration}"
-        stream = build_stream(file_path, video=(mode == "video"), ffmpeg=ffmpeg)
-        await client.play(chat_id, stream)
+        await self._play_stream_safe(client, chat_id, file_path, (mode == "video"), ffmpeg=ffmpeg)
 
     async def speedup_stream(self, chat_id, file_path, speed, playing):
         client = await self.get_tgcalls(chat_id)
@@ -477,10 +500,8 @@ class Call:
         played, con_seconds = speed_converter(playing[0]["played"], speed)
         ffmpeg = f"-ss {played} -to {seconds_to_min(dur)}"
         
-        stream = build_stream(out, video=(playing[0]["streamtype"] == "video"), ffmpeg=ffmpeg)
-
         if chat_id in db:
-            await client.play(chat_id, stream)
+            await self._play_stream_safe(client, chat_id, out, (playing[0]["streamtype"] == "video"), ffmpeg=ffmpeg)
             db[chat_id][0].update({"played": con_seconds, "dur": seconds_to_min(dur), "seconds": dur, "speed_path": out, "speed": speed})
 
     async def stream_call(self, link):
@@ -492,25 +513,43 @@ class Call:
             try: await assistant.leave_call(config.LOGGER_ID)
             except: pass
 
+    # =======================================================================
+    # 🧩 4. UPDATED DECORATORS (v2.x Syntax)
+    # =======================================================================
     async def decorators(self):
-        # تم إصلاح الديكورات لتجنب AttributeError
-        for client in [self.one, self.two, self.three, self.four, self.five]:
-            if client:
-                @client.on_kicked()
-                @client.on_closed_voice_chat()
-                @client.on_left()
-                @client.on_stream_end()
-                async def handler(client, update: Update):
-                    try:
-                        chat_id = update.chat_id
-                    except AttributeError:
-                        return
-                    
-                    if isinstance(update, StreamEnded):
-                        if update.stream_type == StreamEnded.Type.AUDIO:
-                            try: await self.change_stream(client, chat_id)
-                            except: pass
-                    else:
-                        await self.stop_stream(chat_id)
+        assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
+
+        async def unified_update_handler(client, update: Update):
+            # التأكد من أن التحديث يخص شات معين
+            if not getattr(update, "chat_id", None):
+                return
+            
+            chat_id = update.chat_id
+
+            # التعامل مع انتهاء الأغنية
+            if isinstance(update, StreamEnded):
+                # يمكنك هنا إضافة فلتر إذا أردت تجاهل بعض الحالات
+                # مثلاً تجاهل الفيديو إذا كنت مهتماً بالصوت فقط
+                try: 
+                    await self.change_stream(client, chat_id)
+                except Exception as e: 
+                    LOGGER(__name__).error(f"Error handling StreamEnded for {chat_id}: {e}")
+
+            # التعامل مع تحديثات المكالمة (الخروج، الطرد، الإغلاق)
+            elif isinstance(update, ChatUpdate):
+                status = update.status
+                # إذا خرج المساعد أو انغلقت المكالمة
+                if (status == ChatUpdate.Status.LEFT_CALL) or \
+                   (status == ChatUpdate.Status.KICKED) or \
+                   (status == ChatUpdate.Status.CLOSED_VOICE_CHAT):
+                    await self.stop_stream(chat_id)
+
+        # ربط الـ Handler الموحد بكل المساعدين
+        for assistant in assistants:
+            try:
+                if hasattr(assistant, 'on_update'):
+                    assistant.on_update()(unified_update_handler)
+            except Exception as e:
+                LOGGER(__name__).error(f"Failed to attach decorators: {e}")
 
 Hotty = Call()
