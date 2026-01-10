@@ -1,70 +1,87 @@
 # core/pytgcalls_patch.py
 # ==============================================================================
-# 🧠 SMART HEALER PATCH (النسخة الذكية الآمنة)
-# 1. Advanced Introspection: يبحث عن البيانات بذكاء داخل الكائن.
-# 2. No Loop Dependency: لا يعتمد على Asyncio وقت التحميل لتجنب الأخطاء.
-# 3. Fail-Safe: مصمم ليعمل حتى لو المكتبة بها مشاكل.
+# 👻 GHOST PATCH (الشبح الذكي)
+# 1. Background Monitor: يعمل في الخلفية ولا يعطل تشغيل البوت.
+# 2. Lazy Injection: ينتظر حتى يتم تحميل المكتبة ثم يصلحها.
+# 3. No Crashes: لا يتأثر بمشاكل الـ Event Loop أو ترتيب الاستدعاء.
 # ==============================================================================
 
-import logging
 import sys
+import threading
+import time
+import logging
 
-# إعداد لوجر خاص للباتش لتوثيق العملية بذكاء
-PATCH_LOGGER = logging.getLogger("SmartPatch")
+# إعداد اللوجر
+PATCH_LOGGER = logging.getLogger("GhostPatch")
 
-def _smart_get_chat_id(self):
+# ------------------------------------------------------------------------------
+# 🧠 The Healer Logic (المعالج الذكي)
+# ------------------------------------------------------------------------------
+def _smart_chat_id(self):
     """
-    دالة ذكية لاستخراج Chat ID من الكائن المكسور.
-    تحاول البحث في عدة أماكن قبل الاستسلام.
+    يقوم بالبحث عن الـ Chat ID في كل مكان ممكن داخل الكائن.
     """
     try:
-        # المحاولة 1: الطريقة الرسمية (عبر كائن chat)
+        # 1. المحاولة المباشرة
         if hasattr(self, "chat") and self.chat:
             return getattr(self.chat, "id", 0)
         
-        # المحاولة 2: البحث في القاموس الداخلي (Introspection)
-        # أحياناً Pyrogram بيخبي البيانات هنا لو الكائن مش مكتمل
+        # 2. التنقيب في البيانات الداخلية (Introspection)
         if hasattr(self, "__dict__"):
-            data = self.__dict__
-            if "chat_id" in data:
-                return data["chat_id"]
-            if "chat" in data:
-                chat_obj = data["chat"]
-                if hasattr(chat_obj, "id"):
-                    return chat_obj.id
-                if isinstance(chat_obj, dict):
-                    return chat_obj.get("id", 0)
-
-        # المحاولة 3: لو فشل كل شيء، نرجع 0 (Fail-Safe)
-        # إرجاع 0 أفضل من Crash، لأن البوت هيتجاهل التحديث بس مش هيقفل
+            d = self.__dict__
+            if "chat_id" in d: return d["chat_id"]
+            if "chat" in d:
+                return getattr(d["chat"], "id", 0) if hasattr(d["chat"], "id") else 0
+                
+        return 0 # أمان من الفشل
+    except:
         return 0
 
-    except Exception as e:
-        # لو حصل خطأ أثناء المعالجة، نسجله ونكمل
-        return 0
-
-def apply_smart_patch():
-    try:
-        # محاولة استيراد الأنواع فقط (Types) لأنها لا تتطلب Event Loop
-        # هذا يحل مشكلة "There is no current event loop"
-        from pytgcalls.types import UpdateGroupCall
-
-        # التحقق الذكي: هل نحتاج للتدخل؟
-        if not hasattr(UpdateGroupCall, "chat_id"):
+# ------------------------------------------------------------------------------
+# 🕵️ The Monitor (المراقب)
+# ------------------------------------------------------------------------------
+def _monitor_and_patch():
+    """
+    تراقب هذه الدالة تحميل مكتبة pytgcalls.
+    بمجرد ظهور المكتبة في الذاكرة، تقوم بتطبيق الإصلاح فوراً.
+    """
+    attempts = 0
+    max_attempts = 30 # يحاول لمدة 15 ثانية تقريباً
+    
+    while attempts < max_attempts:
+        try:
+            # هل تم تحميل pytgcalls.types؟
+            if "pytgcalls.types" in sys.modules:
+                module = sys.modules["pytgcalls.types"]
+                
+                # هل الكلاس موجود؟
+                if hasattr(module, "UpdateGroupCall"):
+                    TargetClass = getattr(module, "UpdateGroupCall")
+                    
+                    # هل يحتاج لإصلاح؟
+                    if not hasattr(TargetClass, "chat_id"):
+                        TargetClass.chat_id = property(_smart_chat_id)
+                        PATCH_LOGGER.info("✅ GHOST PATCH: 'UpdateGroupCall' detected and HEALED successfully.")
+                        return # تمت المهمة، نغلق الخيط
+                    else:
+                        # قد يكون تم إصلاحه بالفعل
+                        return 
             
-            # 💉 الحقن الذكي: نزرع الدالة المعالجة كخاصية (Property)
-            UpdateGroupCall.chat_id = property(_smart_get_chat_id)
+            # لو لسه، ننتظر نصف ثانية ونحاول تاني
+            time.sleep(0.5)
+            attempts += 1
             
-            PATCH_LOGGER.info("✅ SMART PATCH APPLIED: 'UpdateGroupCall' has been healed.")
-            print("✅ SMART PATCH LOADED: System is protected against missing chat_id.")
-        else:
-            PATCH_LOGGER.info("ℹ️ SMART PATCH: System is already healthy.")
+        except Exception as e:
+            # لا نزعج اللوج بأخطاء الانتظار
+            pass
+            
+    PATCH_LOGGER.warning("⚠️ GHOST PATCH: Timed out waiting for pytgcalls.")
 
-    except ImportError:
-        # لو المكتبة مش موجودة، ده مش خطأ قاتل، ممكن تكون لسه متحملتش
-        print("⚠️ SMART PATCH: pytgcalls types not found yet. (Will retry naturally)")
-    except Exception as e:
-        PATCH_LOGGER.error(f"❌ Smart Patch Error: {e}")
+# ------------------------------------------------------------------------------
+# 🚀 Execution (التنفيذ)
+# ------------------------------------------------------------------------------
+# نشغل المراقب في خيط منفصل (Thread) عشان ميعطلش البوت وهو بيقوم
+# ده بيحل مشكلة "No Event Loop" لأننا خرجنا برة الـ Async تماماً
+threading.Thread(target=_monitor_and_patch, daemon=True).start()
 
-# تنفيذ العملية فور استدعاء الملف
-apply_smart_patch()
+print("✅ GHOST PATCH ARMED: Monitoring system for pytgcalls...")
