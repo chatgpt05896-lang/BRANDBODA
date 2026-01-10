@@ -14,7 +14,7 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
-# استيراد الأخطاء بشكل آمن
+# استيراد الأخطاء بأمان
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound, NotInCallError
 except ImportError:
@@ -90,36 +90,39 @@ class SmartCache:
 music_cache = SmartCache()
 
 # =======================================================================
-# 🔊 AUDIO & FFmpeg CONFIGURATION (STABLE)
+# 🔊 INTELLIGENT AUDIO CONFIGURATION
 # =======================================================================
 
-# إعدادات أكثر استقراراً لمنع وضع "المستمع الصامت"
-# تم إزالة الفلاتر المعقدة والاعتماد على الـ Flags الأساسية
-REMOTE_FFMPEG = (
+# 1. الوضع الأساسي: جودة عالية وسرعة
+PRIMARY_FFMPEG = (
     "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
     "-ac 2 -ar 48000 "
     "-vn "
-    "-preset veryfast"
+    "-preset ultrafast "
+    "-fflags +genpts"
 )
 
-LOCAL_FFMPEG = (
-    "-ac 2 -ar 48000 "
+# 2. وضع الطوارئ: لو البوت فضل "مستمع"، بنستخدم إعدادات خام (Raw)
+BACKUP_FFMPEG = (
+    "-ac 1 -ar 48000 "  # مونو بدل ستيريو لتقليل الباندويدث
     "-vn "
-    "-preset veryfast"
+    "-preset ultrafast "
+    "-tune zerolatency" # إجبار انعدام التأخير
 )
 
-def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
+def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0, use_backup: bool = False) -> MediaStream:
     is_url = path.startswith("http")
-    base_ffmpeg = REMOTE_FFMPEG if is_url else LOCAL_FFMPEG
+    
+    # اختيار المعالج بناء على الوضع (أساسي أم طوارئ)
+    base_ffmpeg = BACKUP_FFMPEG if use_backup else (PRIMARY_FFMPEG if is_url else LOCAL_FFMPEG)
     
     final_ffmpeg = f"{base_ffmpeg} {ffmpeg}" if ffmpeg else base_ffmpeg
 
-    # استخدام Quality.HIGH بدلاً من STUDIO لأنه أكثر توافقاً مع الخوادم
-    # ويمنع التقطيع أو الصمت المفاجئ
-    audio_params = AudioQuality.HIGH
+    # إعدادات الصوت: في وضع الطوارئ نقلل الجودة قليلاً لضمان التشغيل
+    audio_params = AudioQuality.HIGH if use_backup else AudioQuality.STUDIO
 
     if video:
-        video_q = VideoQuality.HD_720p if is_url or duration > 600 else VideoQuality.FHD_1080p
+        video_q = VideoQuality.SD_480p if use_backup else (VideoQuality.HD_720p if is_url or duration > 600 else VideoQuality.FHD_1080p)
         return MediaStream(
             media_path=path,
             audio_parameters=audio_params,
@@ -133,6 +136,8 @@ def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: i
             video_flags=MediaStream.Flags.IGNORE,
             ffmpeg_parameters=final_ffmpeg,
         )
+
+LOCAL_FFMPEG = "-ac 2 -ar 48000 -vn -preset ultrafast"
 
 async def _clear_(chat_id: int) -> None:
     try:
@@ -180,7 +185,7 @@ class Call:
         return self.pytgcalls_map.get(id(assistant), self.one)
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Music Engine (Stable V2)...")
+        LOGGER(__name__).info("🚀 Starting Music Engine (Self-Healing Mode)...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -196,6 +201,71 @@ class Call:
                 except: pass
         return str(round(sum(pings) / len(pings), 3)) if pings else "0.0"
 
+    # ===================================================================
+    # 🧠 SMART JOIN LOGIC (المعالجة الذاتية)
+    # ===================================================================
+
+    async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
+        client = await self.get_tgcalls(chat_id)
+        lang = await get_lang(chat_id)
+        try: _ = get_string(lang)
+        except: _ = {}
+        
+        if not link.startswith("http"):
+            link = os.path.abspath(link)
+
+        # المحاولة الأولى: الإعدادات القياسية
+        stream = build_stream(link, video=bool(video), use_backup=False)
+
+        try:
+            await client.play(chat_id, stream)
+            
+            # 🔥 خطوة إجبارية: إجبار المساعد على التحدث لإلغاء وضع الاستماع
+            try:
+                await asyncio.sleep(0.2)
+                await client.unmute(chat_id)
+            except:
+                pass
+
+        except (NoActiveGroupCall, ChatAdminRequired):
+            raise AssistantErr(_.get("call_8", "قم بفتح المكالمة الصوتية أولاً."))
+        except (NoAudioSourceFound, NoVideoSourceFound):
+            raise AssistantErr(_.get("call_11", "ملف الصوت غير صالح."))
+        except (TelegramServerError, ConnectionNotFound):
+            raise AssistantErr(_.get("call_10", "مشكلة في الاتصال بسيرفر تيليجرام."))
+        except Exception as e:
+            # 🚨 نظام الطوارئ: لو فشل التشغيل، نجرب وضع الـ Backup فوراً
+            LOGGER(__name__).warning(f"Primary Stream Failed: {e}. Switching to Backup Mode...")
+            try:
+                # المحاولة الثانية: إعدادات الطوارئ (Backup)
+                backup_stream = build_stream(link, video=bool(video), use_backup=True)
+                await client.play(chat_id, backup_stream)
+                
+                # إجبار إلغاء الكتم مرة أخرى
+                await asyncio.sleep(0.2)
+                await client.unmute(chat_id)
+                
+            except Exception as final_e:
+                LOGGER(__name__).error(f"Backup Stream Failed: {final_e}")
+                # لو لسه فيه مشكلة، نتجاهلها عشان البوت ميفصلش
+                if "TelegramServerError" not in str(final_e):
+                    raise AssistantErr(f"{final_e}")
+
+        self.active_calls.add(chat_id)
+        await add_active_chat(chat_id)
+        await music_on(chat_id)
+        if video: await add_active_video_chat(chat_id)
+
+        if await is_autoend():
+            try:
+                if len(await client.get_participants(chat_id)) <= 1:
+                    autoend[chat_id] = datetime.now() + timedelta(minutes=1)
+            except: pass
+
+    # ===================================================================
+    # التحكم الآمن
+    # ===================================================================
+
     async def pause_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
         try: await client.pause(chat_id)
@@ -203,7 +273,10 @@ class Call:
 
     async def resume_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
-        try: await client.resume(chat_id)
+        try: 
+            await client.resume(chat_id)
+            # تأكيد إلغاء الكتم عند الاستئناف
+            await client.unmute(chat_id)
         except: pass
 
     async def mute_stream(self, chat_id: int):
@@ -237,46 +310,6 @@ class Call:
             try: await client.leave_call(chat_id)
             except: pass
             finally: self.active_calls.discard(chat_id)
-
-    async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
-        client = await self.get_tgcalls(chat_id)
-        lang = await get_lang(chat_id)
-        try: _ = get_string(lang)
-        except: _ = {}
-        
-        if not link.startswith("http"):
-            link = os.path.abspath(link)
-
-        stream = build_stream(link, video=bool(video))
-
-        try:
-            await client.play(chat_id, stream)
-            # انتظار ضروري للسماح للمكتبة ببدء الدفق
-            await asyncio.sleep(1.5)
-            
-        except (NoActiveGroupCall, ChatAdminRequired):
-            raise AssistantErr(_.get("call_8", "قم بفتح المكالمة الصوتية أولاً."))
-        except (NoAudioSourceFound, NoVideoSourceFound):
-            raise AssistantErr(_.get("call_11", "ملف الصوت غير صالح."))
-        except (TelegramServerError, ConnectionNotFound):
-            raise AssistantErr(_.get("call_10", "مشكلة في الاتصال بسيرفر تيليجرام."))
-        except Exception as e:
-            if "TelegramServerError" in str(e):
-                pass
-            else:
-                LOGGER(__name__).error(f"Join Call Error: {e}")
-                raise AssistantErr(f"{e}")
-            
-        self.active_calls.add(chat_id)
-        await add_active_chat(chat_id)
-        await music_on(chat_id)
-        if video: await add_active_video_chat(chat_id)
-
-        if await is_autoend():
-            try:
-                if len(await client.get_participants(chat_id)) <= 1:
-                    autoend[chat_id] = datetime.now() + timedelta(minutes=1)
-            except: pass
 
     async def change_stream(self, client, chat_id: int):
         check = db.get(chat_id)
@@ -333,6 +366,9 @@ class Call:
             return stream_markup(_, vid_id, chat_id)
 
         try:
+            # هنا أيضاً نستخدم المنطق الذكي: نحاول الأساسي، ولو فشل، الكود سيكمل ولن ينهار
+            # ولكن في change_stream الأفضل الاعتماد على الإعدادات الثابتة لسرعة التنقل
+            
             if "live_" in queued:
                 n, link = await YouTube.video(videoid, True)
                 if n == 0: return await app.send_message(original_chat_id, text=_.get("call_6", "خطأ في البث"))
@@ -433,7 +469,13 @@ class Call:
                         )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
-                    
+            
+            # 🔥 إجبار إلغاء الكتم عند تغيير الأغنية أيضاً
+            try:
+                await asyncio.sleep(0.2)
+                await client.unmute(chat_id)
+            except: pass
+
         except Exception as e:
             LOGGER(__name__).error(f"Play Error: {e}")
             try:
@@ -492,21 +534,14 @@ class Call:
             try: await assistant.leave_call(config.LOGGER_ID)
             except: pass
 
-    # ===================================================================
-    # ⚠️ منطقة المعالجة الآمنة (The Safe Zone)
-    # هنا تم إلغاء استخدام on_update لمنع الانهيار نهائياً
-    # ===================================================================
     async def decorators(self):
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def _on_stream_end(client, update: Update):
-            try:
-                await self.change_stream(client, update.chat_id)
-            except Exception:
-                pass
+            try: await self.change_stream(client, update.chat_id)
+            except Exception: pass
 
         async def _on_chat_update(client, update: Update):
-            # معالجة حالات الخروج فقط
             try:
                 chat_id = update.chat_id
                 status = update.status
@@ -515,24 +550,19 @@ class Call:
                    (status & ChatUpdate.Status.CLOSED_VOICE_CHAT):
                     await self.stop_stream(chat_id)
             except AttributeError:
-                pass # تجاهل التحديثات التالفة
+                pass
 
         for assistant in assistants:
-            # ربط الدوال بالأحداث المحددة فقط
-            # PyTgCalls 2.x يدعم هذه الديكوراتورز
             try:
                 if hasattr(assistant, 'on_stream_end'):
                     assistant.on_stream_end()(_on_stream_end)
                 
                 if hasattr(assistant, 'on_kicked'):
                     assistant.on_kicked()(_on_chat_update)
-                
                 if hasattr(assistant, 'on_closed_voice_chat'):
                     assistant.on_closed_voice_chat()(_on_chat_update)
-                    
                 if hasattr(assistant, 'on_left'):
                     assistant.on_left()(_on_chat_update)
-            except:
-                pass
+            except: pass
 
 Hotty = Call()
