@@ -1,15 +1,9 @@
-# call.py
-# نسخة محسّنة من Call manager مع حماية من GROUPCALL_INVALID و UpdateGroupCall
-# ومهمة hard-reset لإعادة تشغيل الـ userbots و pytgcalls بأمان.
-
+# BrandrdXMusic/core/call.py
 import asyncio
 import os
 import random
 from datetime import datetime, timedelta
 from typing import Union
-
-# المهم جداً: استدعاء الباتش قبل أي تحميل لـ PyTgCalls أو Pyrogram internals
-from . import pytgcalls_patch  # تأكد المسار صحيح داخل مشروعك
 
 from pyrogram import Client
 from pyrogram.errors import UserAlreadyParticipant
@@ -25,10 +19,10 @@ from pytgcalls.types import (
     Update
 )
 
-# استيراد raw functions لو احتجنا لإنشاء مكالمة كخيار بديل (best-effort)
+# استيراد raw functions لو احتجنا لإنشاء مكالمة كخيار بديل
 from pyrogram.raw import functions as raw_functions
 
-# استيراد الاستثناءات من pytgcalls إن كانت متاحة
+# استيراد الاستثناءات من pytgcalls
 try:
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
@@ -39,16 +33,8 @@ try:
         AlreadyJoinedError,
     )
 except Exception:
-    class NoActiveGroupCall(Exception): pass
-    class NoAudioSourceFound(Exception): pass
-    class NoVideoSourceFound(Exception): pass
-    class TelegramServerError(Exception): pass
-    class ConnectionNotFound(Exception): pass
-    class AlreadyJoinedError(Exception): pass
+    pass
 
-# =======================================================================
-# استورد وظائف المشروع (تأكد أن هذه المسارات موجودة في مشروعك)
-# =======================================================================
 import config
 from strings import get_string
 from BrandrdXMusic import LOGGER, YouTube, app
@@ -76,15 +62,9 @@ try:
 except Exception:
     stream_markup2 = None
 
-# =======================================================================
-# حالات autoend per chat
-# =======================================================================
 autoend = {}
 counter = {}
 
-# =======================================================================
-# مساعدة لبناء stream مع تحسينات ffmpeg
-# =======================================================================
 def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
     is_url = isinstance(path, str) and path.startswith("http")
     base_ffmpeg = " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ac 2"
@@ -106,9 +86,6 @@ def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: i
         ffmpeg_parameters=final_ffmpeg if final_ffmpeg else None,
     )
 
-# =======================================================================
-# تنظيف queue / حذف حالات الفيديو/الموسيقى
-# =======================================================================
 async def _clear_(chat_id: int) -> None:
     try:
         if popped := db.pop(chat_id, None):
@@ -119,12 +96,8 @@ async def _clear_(chat_id: int) -> None:
     except Exception:
         pass
 
-# =======================================================================
-# Call manager class
-# =======================================================================
 class Call:
     def __init__(self):
-        # أنشئ الـ userbots ثم PyTgCalls لكلٍ منهم (إذا كانت session strings موجودة)
         self.userbot1 = Client("BrandrdXMusic1", config.API_ID, config.API_HASH, session_string=config.STRING1) if getattr(config, "STRING1", None) else None
         self.one = PyTgCalls(self.userbot1) if self.userbot1 else None
 
@@ -142,7 +115,6 @@ class Call:
 
         self.active_calls = set()
 
-        # خريطة id(assistant) -> pytgcalls instance
         self.pytgcalls_map = {
             id(self.userbot1) if self.userbot1 else None: self.one,
             id(self.userbot2) if self.userbot2 else None: self.two,
@@ -155,78 +127,6 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
-    # ===================================================================
-    # Hard reset: إعادة تشغيل userbot و pytgcalls آمنة
-    # ===================================================================
-    async def _hard_reset(self, chat_id: int):
-        LOGGER(__name__).warning(f"Performing hard reset for chat {chat_id}...")
-
-        # حاول تنظيف الحالة محليًا
-        try:
-            await _clear_(chat_id)
-        except Exception as e:
-            LOGGER(__name__).error(f"Error clearing db state for {chat_id}: {e}")
-
-        assistants = [self.userbot1, self.userbot2, self.userbot3, self.userbot4, self.userbot5]
-        calls = [self.one, self.two, self.three, self.four, self.five]
-
-        # leave_call attempt
-        for c in calls:
-            if c:
-                try:
-                    await c.leave_call(chat_id)
-                except Exception:
-                    pass
-
-        # Stop all PyTgCalls
-        for c in calls:
-            if c:
-                try:
-                    await c.stop()
-                except Exception:
-                    try:
-                        c.stop()
-                    except Exception:
-                        pass
-
-        # Stop clients (userbots)
-        for bot in assistants:
-            if bot:
-                try:
-                    await bot.stop()
-                except Exception:
-                    try:
-                        bot.stop()
-                    except Exception:
-                        pass
-
-        # small delay to allow sockets to close
-        await asyncio.sleep(2)
-
-        # Start clients and pytgcalls again
-        for bot, call in zip(assistants, calls):
-            if bot:
-                try:
-                    await bot.start()
-                except Exception as e:
-                    LOGGER(__name__).error(f"Failed to start assistant {bot}: {e}")
-            if call:
-                try:
-                    await call.start()
-                except Exception as e:
-                    LOGGER(__name__).error(f"Failed to start pytgcalls instance: {e}")
-
-        # remove chat from active_calls
-        try:
-            self.active_calls.discard(chat_id)
-        except Exception:
-            pass
-
-        LOGGER(__name__).info(f"Hard reset finished for chat {chat_id}")
-
-    # ===================================================================
-    # Safe play: معالجات لخطأ GROUPCALL_INVALID و NOACTIVEGROUPCALL
-    # ===================================================================
     async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
         stream = build_stream(path, video, ffmpeg, duration_sec)
         try:
@@ -237,28 +137,8 @@ class Call:
         except Exception as e:
             err_str = str(e)
             LOGGER(__name__).error(f"_play_stream_safe error for {chat_id}: {err_str}")
-
-            if "GROUPCALL_INVALID" in err_str or "GROUPCALL_FORBIDDEN" in err_str:
-                LOGGER(__name__).warning(f"⚠️ Invalid Group Call in {chat_id}, performing hard reset...")
-                try:
-                    await self._hard_reset(chat_id)
-                except Exception as re:
-                    LOGGER(__name__).error(f"Hard reset failed for {chat_id}: {re}")
-                raise Exception("GROUPCALL_INVALID")
-
-            if "Call not found" in err_str or "not found" in err_str:
-                try:
-                    await self._hard_reset(chat_id)
-                except Exception:
-                    pass
-                raise Exception("CALL_NOT_FOUND")
-
-            # تصاعد الاستثناءات الأخرى لمعالجتها في مكان أعلى
             raise e
 
-    # ===================================================================
-    # Startup helpers
-    # ===================================================================
     async def start(self):
         LOGGER(__name__).info("🚀 Starting Audio Engine...")
         clients = [c for c in [self.one, self.two, self.three, self.four, self.five] if c]
@@ -322,9 +202,6 @@ class Call:
             finally:
                 self.active_calls.discard(chat_id)
 
-    # ===================================================================
-    # join_call مع محاولة إنشاء مكالمة لو لم تكن موجودة (best-effort)
-    # ===================================================================
     async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
         client = await self.get_tgcalls(chat_id)
         assistant = await group_assistant(self, chat_id)
@@ -335,7 +212,6 @@ class Call:
             link = os.path.abspath(link)
 
         try:
-            # ensure assistant in chat (best-effort)
             try:
                 await assistant.join_chat(chat_id)
             except UserAlreadyParticipant:
@@ -346,7 +222,6 @@ class Call:
             try:
                 await self._play_stream_safe(client, chat_id, link, bool(video))
             except NoActiveGroupCall:
-                # لا توجد مكالمة نشطة — محاولة إنشاء مكالمة جديدة عبر Raw API كـ best-effort
                 try:
                     try:
                         peer = await assistant.resolve_peer(chat_id)
@@ -355,35 +230,28 @@ class Call:
                         await asyncio.sleep(1.5)
                     except Exception as create_ex:
                         LOGGER(__name__).warning(f"CreateGroupCall attempt failed for {chat_id}: {create_ex}")
-                        await self._hard_reset(chat_id)
                         raise AssistantErr(_["call_8"])
-
-                    # بعد الإنشاء، حاول التشغيل مرة ثانية
+                    
                     await self._play_stream_safe(client, chat_id, link, bool(video))
                 except Exception as inner_e:
-                    LOGGER(__name__).error(f"Join Call after create attempt failed: {inner_e}")
                     raise AssistantErr(_["call_8"])
 
-        except NoActiveGroupCall:
+        except (NoActiveGroupCall, AssistantErr):
             raise AssistantErr(_["call_8"])
         except (NoAudioSourceFound, NoVideoSourceFound):
             raise AssistantErr(_["call_11"])
         except (TelegramServerError, ConnectionNotFound):
             raise AssistantErr(_["call_10"])
         except Exception as e:
-            if "GROUPCALL_INVALID" in str(e) or "CALL_NOT_FOUND" in str(e):
-                raise AssistantErr(_["call_8"])
             LOGGER(__name__).error(f"Join Call Error: {e}")
             raise AssistantErr(str(e))
 
-        # لو نجحت الإضافة:
         self.active_calls.add(chat_id)
         await add_active_chat(chat_id)
         await music_on(chat_id)
         if video:
             await add_active_video_chat(chat_id)
 
-        # autoend handling
         if await is_autoend():
             try:
                 if await assistant.get_chat_members_count(chat_id) <= 1:
@@ -391,9 +259,6 @@ class Call:
             except Exception:
                 pass
 
-    # ===================================================================
-    # تغيير المسار/التراك بعد انتهاء مقطع
-    # ===================================================================
     async def change_stream(self, client, chat_id: int):
         check = db.get(chat_id)
         popped = None
@@ -548,9 +413,6 @@ class Call:
             except Exception:
                 pass
 
-    # ===================================================================
-    # skip / seek / speedup helpers
-    # ===================================================================
     async def skip_stream(self, chat_id, link, video=None, image=None):
         client = await self.get_tgcalls(chat_id)
         if not link.startswith("http"):
@@ -592,9 +454,6 @@ class Call:
                 "speed": speed
             })
 
-    # ===================================================================
-    # diagnostic stream (logger)
-    # ===================================================================
     async def stream_call(self, link):
         assistant = await self.get_tgcalls(config.LOGGER_ID)
         try:
@@ -606,18 +465,12 @@ class Call:
             except Exception:
                 pass
 
-    # ===================================================================
-    # decorators: unified update handler مع حماية إضافية
-    # ===================================================================
     async def decorators(self):
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
             try:
-                # حماية: إذا تحديث بدون chat_id => تجاهله
-                if not hasattr(update, "chat_id"):
-                    return
-
+                # الكود الجديد اللي بيفهم chat_id و chat.id تلقائياً من غير باتش
                 chat_id = update.chat_id
 
                 if isinstance(update, StreamEnded):
@@ -644,5 +497,4 @@ class Call:
             except Exception as e:
                 LOGGER(__name__).error(f"Failed to attach decorators: {e}")
 
-# instance جاهز للاستخدام
 Hotty = Call()
