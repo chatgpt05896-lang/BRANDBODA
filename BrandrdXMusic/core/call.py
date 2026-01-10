@@ -1,8 +1,7 @@
 import asyncio
 import os
-import time
 from datetime import datetime, timedelta
-from typing import Union, Dict
+from typing import Union
 
 from pyrogram import Client
 from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant, UserNotParticipant
@@ -17,7 +16,8 @@ from pytgcalls.types import (
     ChatUpdate, 
     Update
 )
-# معالجة استثناءات المكتبة بشكل شامل
+
+# محاولة استيراد الاستثناءات بشكل آمن لضمان التوافق مع مختلف الإصدارات
 try:
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
@@ -28,6 +28,7 @@ try:
         AlreadyJoinedError
     )
 except ImportError:
+    # إنشاء استثناءات وهمية في حال عدم وجودها في المكتبة لتجنب الأخطاء
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
         NoAudioSourceFound,
@@ -68,37 +69,29 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ إعدادات FFmpeg المحسنة (لحل مشكلة الصمت والـ Timeout)
+# ⚙️ إعدادات FFmpeg السريعة (Instant Start)
 # =======================================================================
-
-# تم إزالة الأوامر المعقدة التي تسبب Timeout واستبدالها بأوامر مستقرة
-REMOTE_FFMPEG = (
-    "-reconnect 1 "
-    "-reconnect_streamed 1 "
-    "-reconnect_delay_max 5 "
-    "-nostdin "
-    "-vn " # تجاهل الفيديو للصوتيات لتقليل الضغط
-)
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
     is_url = path.startswith("http")
     
-    # تحسينات للصوت فقط لتفادي التقطيع
-    ffmpeg_params = ffmpeg if ffmpeg else ""
-    if is_url and not video:
-        ffmpeg_params += " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    # تحسينات الاتصال المباشر لتقليل التأخير
+    # تم إزالة التعقيدات التي تسبب التجميد
+    final_ffmpeg = ffmpeg if ffmpeg else ""
+    if is_url:
+        # هذه الأوامر تجبر البوت على إعادة الاتصال دون انتظار تحميل الملف بالكامل
+        final_ffmpeg += " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 
-    # استخدام إعدادات High بدلاً من Studio لأنها أكثر استقراراً في السيرفرات الضعيفة
-    # Studio يتطلب سرعة رفع عالية جداً مما يسبب Timeout
+    # استخدام جودة متوسطة لضمان السرعة وعدم التقطيع
     audio_params = AudioQuality.HIGH 
-    video_params = VideoQuality.HD_720p if video else VideoQuality.SD_480p
+    video_params = VideoQuality.SD_480p if video else VideoQuality.SD_480p
 
     return MediaStream(
         media_path=path,
         audio_parameters=audio_params,
         video_parameters=video_params,
         video_flags=MediaStream.Flags.IGNORE if not video else MediaStream.Flags.REQUIRED,
-        ffmpeg_parameters=ffmpeg_params if ffmpeg_params else None,
+        ffmpeg_parameters=final_ffmpeg if final_ffmpeg else None,
     )
 
 async def _clear_(chat_id: int) -> None:
@@ -117,21 +110,21 @@ async def _clear_(chat_id: int) -> None:
 
 class Call:
     def __init__(self):
-        # إضافة cache_duration=100 لحل مشكلة التايم أوت
+        # ⚠️ تم إزالة cache_duration=100 لأنه السبب في تعليق البوت
         self.userbot1 = Client("BrandrdXMusic1", config.API_ID, config.API_HASH, session_string=config.STRING1) if config.STRING1 else None
-        self.one = PyTgCalls(self.userbot1, cache_duration=100) if self.userbot1 else None
+        self.one = PyTgCalls(self.userbot1) if self.userbot1 else None
 
         self.userbot2 = Client("BrandrdXMusic2", config.API_ID, config.API_HASH, session_string=config.STRING2) if config.STRING2 else None
-        self.two = PyTgCalls(self.userbot2, cache_duration=100) if self.userbot2 else None
+        self.two = PyTgCalls(self.userbot2) if self.userbot2 else None
 
         self.userbot3 = Client("BrandrdXMusic3", config.API_ID, config.API_HASH, session_string=config.STRING3) if config.STRING3 else None
-        self.three = PyTgCalls(self.userbot3, cache_duration=100) if self.userbot3 else None
+        self.three = PyTgCalls(self.userbot3) if self.userbot3 else None
 
         self.userbot4 = Client("BrandrdXMusic4", config.API_ID, config.API_HASH, session_string=config.STRING4) if config.STRING4 else None
-        self.four = PyTgCalls(self.userbot4, cache_duration=100) if self.userbot4 else None
+        self.four = PyTgCalls(self.userbot4) if self.userbot4 else None
 
         self.userbot5 = Client("BrandrdXMusic5", config.API_ID, config.API_HASH, session_string=config.STRING5) if config.STRING5 else None
-        self.five = PyTgCalls(self.userbot5, cache_duration=100) if self.userbot5 else None
+        self.five = PyTgCalls(self.userbot5) if self.userbot5 else None
 
         self.active_calls = set()
         
@@ -147,50 +140,49 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
-    # --- تشغيل آمن يمنع تعليق المساعد ---
+    # --- دالة التشغيل الآمنة (بدون انتظار طويل) ---
     async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
         assistant = await group_assistant(self, chat_id)
         
-        # 1. التأكد من انضمام المساعد
+        # التأكد من الانضمام
         try:
-            await assistant.get_chat_member(chat_id, assistant.me.id)
+            member = await assistant.get_chat_member(chat_id, assistant.me.id)
         except UserNotParticipant:
             try:
                 await assistant.join_chat(chat_id)
-                await asyncio.sleep(2) # انتظار لضمان استقرار الاتصال
-            except Exception as e:
+                await asyncio.sleep(1) 
+            except Exception:
                 pass
-
-        # 2. تنظيف الاتصالات الميتة (Dead Connections)
-        # إذا كان المساعد يعتقد أنه في المكالمة ولكن الصوت لا يعمل، نخرجه أولاً
-        try:
-            if chat_id in self.active_calls:
-                 await client.leave_call(chat_id)
-                 await asyncio.sleep(0.5)
-        except:
+        except Exception:
             pass
 
-        # 3. التشغيل
+        # بناء البث وتشغيله
         try:
             stream = build_stream(path, video, ffmpeg, duration_sec)
             await client.play(chat_id, stream)
+            
+            # 💡 إصلاح "التعليق":
+            # إذا لم يكن هناك خطأ، فهذا يعني أن الأمر تم إرساله للمكتبة.
+            # لا ننتظر هنا، بل نترك المكتبة تتولى البث.
+            
         except NoActiveGroupCall:
-            raise NoActiveGroupCall
+            # إذا لم تكن هناك مكالمة نشطة، حاول إنشاء واحدة أو ارمِ الخطأ
+             raise NoActiveGroupCall
+             
         except Exception as e:
-            # معالجة أخطاء GROUPCALL_INVALID
-            if "GROUPCALL_INVALID" in str(e) or "The specified group call is invalid" in str(e):
-                 # المساعد عالق في حالة خطأ، يجب الخروج القسري وإعادة المحاولة
+            if "GROUPCALL_INVALID" in str(e):
                  try: await client.leave_call(chat_id)
                  except: pass
                  await asyncio.sleep(1)
                  await client.play(chat_id, stream)
             else:
-                LOGGER(__name__).error(f"Stream Failed: {e}")
+                LOGGER(__name__).error(f"Stream Error: {e}")
                 raise e
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Advanced Audio Engine...")
+        LOGGER(__name__).info("🚀 Starting Audio Engine...")
         clients = [self.one, self.two, self.three, self.four, self.five]
+        # بدء العملاء
         tasks = [c.start() for c in clients if c]
         if tasks:
             await asyncio.gather(*tasks)
@@ -252,19 +244,18 @@ class Call:
         if not link.startswith("http"):
             link = os.path.abspath(link)
 
-        # ضمان وجود المساعد
+        # ضمان الانضمام للمجموعة أولاً
         try:
             await assistant.join_chat(chat_id)
         except UserAlreadyParticipant:
             pass
         except Exception:
-            # قد يفشل الانضمام لأسباب تتعلق بالخصوصية، نستمر للمحاولة عبر المكالمة
             pass
 
         try:
             await self._play_stream_safe(client, chat_id, link, bool(video))
             
-        except (NoActiveGroupCall, ChatAdminRequired):
+        except NoActiveGroupCall:
             raise AssistantErr(_["call_8"])
         except (NoAudioSourceFound, NoVideoSourceFound):
             raise AssistantErr(_["call_11"])
@@ -327,12 +318,6 @@ class Call:
             
         db[chat_id][0]["played"] = 0
 
-        if check[0].get("old_dur"):
-            db[chat_id][0]["dur"] = check[0]["old_dur"]
-            db[chat_id][0]["seconds"] = check[0]["old_second"]
-            db[chat_id][0]["speed_path"] = None
-            db[chat_id][0]["speed"] = 1.0
-
         video = True if str(streamtype) == "video" else False
 
         def get_btn(vid_id):
@@ -358,7 +343,6 @@ class Call:
 
             elif "vid_" in queued:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
-                
                 try: 
                     file_path, direct = await YouTube.download(videoid, mystic, videoid=True, video=video)
                 except: 
@@ -379,7 +363,6 @@ class Call:
 
             elif "index_" in queued:
                 await self._play_stream_safe(client, chat_id, videoid, video, duration_sec)
-
                 run = await app.send_photo(
                     chat_id=original_chat_id,
                     photo=config.STREAM_IMG_URL,
@@ -391,7 +374,7 @@ class Call:
 
             else:
                 await self._play_stream_safe(client, chat_id, queued, video, duration_sec)
-
+                
                 if videoid == "telegram":
                     img = config.TELEGRAM_AUDIO_URL if str(streamtype) == "audio" else config.TELEGRAM_VIDEO_URL
                     run = await app.send_photo(
@@ -402,7 +385,7 @@ class Call:
                     )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
-
+                
                 elif videoid == "soundcloud":
                     run = await app.send_photo(
                         chat_id=original_chat_id,
@@ -412,24 +395,14 @@ class Call:
                     )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
-
                 else:
                     img = await get_thumb(videoid)
-                    try:
-                        run = await app.send_photo(
-                            chat_id=original_chat_id,
-                            photo=img,
-                            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
-                            reply_markup=InlineKeyboardMarkup(stream_markup(_, videoid, chat_id)),
-                        )
-                    except FloodWait as e:
-                        await asyncio.sleep(e.value)
-                        run = await app.send_photo(
-                            chat_id=original_chat_id,
-                            photo=img,
-                            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
-                            reply_markup=InlineKeyboardMarkup(stream_markup(_, videoid, chat_id)),
-                        )
+                    run = await app.send_photo(
+                        chat_id=original_chat_id,
+                        photo=img,
+                        caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
+                        reply_markup=InlineKeyboardMarkup(stream_markup(_, videoid, chat_id)),
+                    )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
                     
@@ -494,8 +467,7 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # إصلاح جوهري: التحقق من وجود chat_id لتجنب AttributeError
-            # هذا الكود سيمنع الخطأ الذي يظهر في السجلات من إيقاف البوت
+            # 💡 الفلتر النهائي لمنع الكراش
             if not getattr(update, "chat_id", None):
                 return
             
@@ -522,3 +494,4 @@ class Call:
                 LOGGER(__name__).error(f"Failed to attach decorators: {e}")
 
 Hotty = Call()
+        
