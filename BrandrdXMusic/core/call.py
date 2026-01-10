@@ -5,7 +5,9 @@ from datetime import datetime, timedelta
 from typing import Union, Dict
 
 from pyrogram import Client
+from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
+
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, AudioQuality, VideoQuality, StreamEnded, ChatUpdate, Update
 from pytgcalls.exceptions import (
@@ -14,16 +16,10 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
-# استيراد الأخطاء بأمان
 try:
-    from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound, NotInCallError
+    from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
-    try:
-        from ntgcalls import TelegramServerError, ConnectionNotFound, NotInCallError
-    except:
-        TelegramServerError = Exception
-        ConnectionNotFound = Exception
-        NotInCallError = Exception
+    from ntgcalls import TelegramServerError, ConnectionNotFound
 
 import config
 from strings import get_string
@@ -56,12 +52,13 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# 🚀 SMART CACHE
+# 🗂️ SMART CACHE SYSTEM
 # =======================================================================
+
 class SmartCache:
     def __init__(self):
         self.cache: Dict[str, Dict] = {}
-        self.ttl = 3600
+        self.ttl = 360  # 6 Minutes
 
     def get(self, video_id: str) -> str:
         self.cleanup()
@@ -69,6 +66,7 @@ class SmartCache:
             entry = self.cache[video_id]
             if time.time() - entry['timestamp'] < self.ttl:
                 if os.path.exists(entry['path']):
+                    LOGGER(__name__).info(f"🚀 Cache Hit: {video_id}")
                     return entry['path']
         return None
 
@@ -84,60 +82,80 @@ class SmartCache:
         for vid, entry in self.cache.items():
             if now - entry['timestamp'] > self.ttl:
                 to_remove.append(vid)
+                if os.path.exists(entry['path']):
+                    try:
+                        os.remove(entry['path'])
+                    except: pass
         for vid in to_remove:
             del self.cache[vid]
 
 music_cache = SmartCache()
 
 # =======================================================================
-# 🔊 INTELLIGENT AUDIO CONFIGURATION
+# ⚙️ STREAM CONFIGURATION & FFmpeg (FIXED)
 # =======================================================================
 
-# 1. الوضع الأساسي: جودة عالية وسرعة
-PRIMARY_FFMPEG = (
-    "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
-    "-ac 2 -ar 48000 "
-    "-vn "
-    "-preset ultrafast "
-    "-fflags +genpts"
+# إعدادات الروابط الخارجية (Live/URL)
+REMOTE_FFMPEG = (
+    "-re "
+    "-reconnect 1 "
+    "-reconnect_streamed 1 "
+    "-reconnect_delay_max 5 "
+    "-nostdin "
+    "-fflags nobuffer "
+    "-flags low_delay "
+    "-loglevel error"
 )
 
-# 2. وضع الطوارئ: لو البوت فضل "مستمع"، بنستخدم إعدادات خام (Raw)
-BACKUP_FFMPEG = (
-    "-ac 1 -ar 48000 "  # مونو بدل ستيريو لتقليل الباندويدث
-    "-vn "
-    "-preset ultrafast "
-    "-tune zerolatency" # إجبار انعدام التأخير
+# إعدادات الملفات المحلية (تم إزالة خيارات الاتصال لتجنب الخطأ)
+LOCAL_FFMPEG = (
+    "-nostdin "
+    "-fflags nobuffer "
+    "-flags low_delay "
+    "-loglevel error"
 )
 
-def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0, use_backup: bool = False) -> MediaStream:
+def get_video_quality(duration_seconds: int = 0, is_live: bool = False) -> VideoQuality:
+    if is_live:
+        return VideoQuality.HD_720p
+    if duration_seconds > 600: 
+        return VideoQuality.HD_720p
+    return VideoQuality.FHD_1080p
+
+def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
+    # تحديد نوع الملف لتطبيق الإعدادات المناسبة
     is_url = path.startswith("http")
     
-    # اختيار المعالج بناء على الوضع (أساسي أم طوارئ)
-    base_ffmpeg = BACKUP_FFMPEG if use_backup else (PRIMARY_FFMPEG if is_url else LOCAL_FFMPEG)
+    base_ffmpeg = REMOTE_FFMPEG if is_url else LOCAL_FFMPEG
     
-    final_ffmpeg = f"{base_ffmpeg} {ffmpeg}" if ffmpeg else base_ffmpeg
+    if ffmpeg:
+        combined_ffmpeg = f"{base_ffmpeg} {ffmpeg}"
+    else:
+        combined_ffmpeg = base_ffmpeg
 
-    # إعدادات الصوت: في وضع الطوارئ نقلل الجودة قليلاً لضمان التشغيل
-    audio_params = AudioQuality.HIGH if use_backup else AudioQuality.STUDIO
-
+    # استخدام High بدلاً من Studio إذا كان الملف محلياً لتجنب مشاكل فك التشفير
+    # Studio يتطلب مصدر قوي جداً، High أكثر استقراراً للملفات المحملة
+    audio_params = AudioQuality.Studio
+    
     if video:
-        video_q = VideoQuality.SD_480p if use_backup else (VideoQuality.HD_720p if is_url or duration > 600 else VideoQuality.FHD_1080p)
+        video_params = get_video_quality(duration, is_live=is_url)
         return MediaStream(
             media_path=path,
             audio_parameters=audio_params,
-            video_parameters=video_q,
-            ffmpeg_parameters=f"-reconnect 1 -reconnect_streamed 1 -ac 2 -ar 48000 {ffmpeg if ffmpeg else ''}",
+            video_parameters=video_params,
+            audio_flags=MediaStream.Flags.REQUIRED,
+            video_flags=MediaStream.Flags.REQUIRED,
+            ffmpeg_parameters=combined_ffmpeg,
         )
     else:
         return MediaStream(
             media_path=path,
             audio_parameters=audio_params,
+            video_parameters=VideoQuality.HD_720p,
+            audio_flags=MediaStream.Flags.REQUIRED,
             video_flags=MediaStream.Flags.IGNORE,
-            ffmpeg_parameters=final_ffmpeg,
+            ffmpeg_parameters=combined_ffmpeg,
         )
-
-LOCAL_FFMPEG = "-ac 2 -ar 48000 -vn -preset ultrafast"
 
 async def _clear_(chat_id: int) -> None:
     try:
@@ -150,7 +168,7 @@ async def _clear_(chat_id: int) -> None:
         pass
 
 # =======================================================================
-# 💎 CORE CLASS
+# 🚀 CORE CLASS
 # =======================================================================
 
 class Call:
@@ -185,7 +203,7 @@ class Call:
         return self.pytgcalls_map.get(id(assistant), self.one)
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Music Engine (Self-Healing Mode)...")
+        LOGGER(__name__).info("🚀 Starting Advanced Music Engine (Stable Mode)...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -201,93 +219,21 @@ class Call:
                 except: pass
         return str(round(sum(pings) / len(pings), 3)) if pings else "0.0"
 
-    # ===================================================================
-    # 🧠 SMART JOIN LOGIC (المعالجة الذاتية)
-    # ===================================================================
-
-    async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
-        client = await self.get_tgcalls(chat_id)
-        lang = await get_lang(chat_id)
-        try: _ = get_string(lang)
-        except: _ = {}
-        
-        if not link.startswith("http"):
-            link = os.path.abspath(link)
-
-        # المحاولة الأولى: الإعدادات القياسية
-        stream = build_stream(link, video=bool(video), use_backup=False)
-
-        try:
-            await client.play(chat_id, stream)
-            
-            # 🔥 خطوة إجبارية: إجبار المساعد على التحدث لإلغاء وضع الاستماع
-            try:
-                await asyncio.sleep(0.2)
-                await client.unmute(chat_id)
-            except:
-                pass
-
-        except (NoActiveGroupCall, ChatAdminRequired):
-            raise AssistantErr(_.get("call_8", "قم بفتح المكالمة الصوتية أولاً."))
-        except (NoAudioSourceFound, NoVideoSourceFound):
-            raise AssistantErr(_.get("call_11", "ملف الصوت غير صالح."))
-        except (TelegramServerError, ConnectionNotFound):
-            raise AssistantErr(_.get("call_10", "مشكلة في الاتصال بسيرفر تيليجرام."))
-        except Exception as e:
-            # 🚨 نظام الطوارئ: لو فشل التشغيل، نجرب وضع الـ Backup فوراً
-            LOGGER(__name__).warning(f"Primary Stream Failed: {e}. Switching to Backup Mode...")
-            try:
-                # المحاولة الثانية: إعدادات الطوارئ (Backup)
-                backup_stream = build_stream(link, video=bool(video), use_backup=True)
-                await client.play(chat_id, backup_stream)
-                
-                # إجبار إلغاء الكتم مرة أخرى
-                await asyncio.sleep(0.2)
-                await client.unmute(chat_id)
-                
-            except Exception as final_e:
-                LOGGER(__name__).error(f"Backup Stream Failed: {final_e}")
-                # لو لسه فيه مشكلة، نتجاهلها عشان البوت ميفصلش
-                if "TelegramServerError" not in str(final_e):
-                    raise AssistantErr(f"{final_e}")
-
-        self.active_calls.add(chat_id)
-        await add_active_chat(chat_id)
-        await music_on(chat_id)
-        if video: await add_active_video_chat(chat_id)
-
-        if await is_autoend():
-            try:
-                if len(await client.get_participants(chat_id)) <= 1:
-                    autoend[chat_id] = datetime.now() + timedelta(minutes=1)
-            except: pass
-
-    # ===================================================================
-    # التحكم الآمن
-    # ===================================================================
-
     async def pause_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
-        try: await client.pause(chat_id)
-        except: pass
+        await client.pause(chat_id)
 
     async def resume_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
-        try: 
-            await client.resume(chat_id)
-            # تأكيد إلغاء الكتم عند الاستئناف
-            await client.unmute(chat_id)
-        except: pass
+        await client.resume(chat_id)
 
     async def mute_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
-        try: await client.mute(chat_id)
-        except: pass
+        await client.mute(chat_id)
 
     async def unmute_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
-        try: await client.unmute(chat_id)
-        except: pass
+        await client.unmute(chat_id)
 
     async def stop_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
@@ -310,6 +256,42 @@ class Call:
             try: await client.leave_call(chat_id)
             except: pass
             finally: self.active_calls.discard(chat_id)
+
+    async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
+        client = await self.get_tgcalls(chat_id)
+        lang = await get_lang(chat_id)
+        _ = get_string(lang)
+        
+        # Ensure path is string and absolute if local
+        if not link.startswith("http"):
+            link = os.path.abspath(link)
+
+        stream = build_stream(link, video=bool(video))
+
+        try:
+            await client.play(chat_id, stream)
+        except (NoActiveGroupCall, ChatAdminRequired):
+            raise AssistantErr(_["call_8"])
+        except (NoAudioSourceFound, NoVideoSourceFound):
+            # This specific error usually means path is wrong or FFmpeg failed
+            LOGGER(__name__).error(f"FFmpeg/Source Error for path: {link}")
+            raise AssistantErr(_["call_11"])
+        except (TelegramServerError, ConnectionNotFound):
+            raise AssistantErr(_["call_10"])
+        except Exception as e:
+            LOGGER(__name__).error(f"Join Call Error: {e}")
+            raise AssistantErr(f"{e}")
+            
+        self.active_calls.add(chat_id)
+        await add_active_chat(chat_id)
+        await music_on(chat_id)
+        if video: await add_active_video_chat(chat_id)
+
+        if await is_autoend():
+            try:
+                if len(await client.get_participants(chat_id)) <= 1:
+                    autoend[chat_id] = datetime.now() + timedelta(minutes=1)
+            except: pass
 
     async def change_stream(self, client, chat_id: int):
         check = db.get(chat_id)
@@ -337,9 +319,7 @@ class Call:
         
         queued = check[0]["file"]
         lang = await get_lang(chat_id)
-        try: _ = get_string(lang)
-        except: _ = {}
-        
+        _ = get_string(lang)
         title = (check[0]["title"]).title()
         user = check[0]["by"]
         original_chat_id = check[0]["chat_id"]
@@ -366,12 +346,9 @@ class Call:
             return stream_markup(_, vid_id, chat_id)
 
         try:
-            # هنا أيضاً نستخدم المنطق الذكي: نحاول الأساسي، ولو فشل، الكود سيكمل ولن ينهار
-            # ولكن في change_stream الأفضل الاعتماد على الإعدادات الثابتة لسرعة التنقل
-            
             if "live_" in queued:
                 n, link = await YouTube.video(videoid, True)
-                if n == 0: return await app.send_message(original_chat_id, text=_.get("call_6", "خطأ في البث"))
+                if n == 0: return await app.send_message(original_chat_id, text=_["call_6"])
 
                 stream = build_stream(link, video, duration=0) 
                 await client.play(chat_id, stream)
@@ -380,23 +357,24 @@ class Call:
                 run = await app.send_photo(
                     chat_id=original_chat_id,
                     photo=img,
-                    caption=_.get("stream_1", "{0}").format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
+                    caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
                     reply_markup=InlineKeyboardMarkup(get_btn(videoid)),
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
 
             elif "vid_" in queued:
-                mystic = await app.send_message(original_chat_id, _.get("call_7", "جاري التحميل..."))
+                mystic = await app.send_message(original_chat_id, _["call_7"])
                 
                 file_path = music_cache.get(videoid)
                 if not file_path:
                     try: 
                         file_path, direct = await YouTube.download(videoid, mystic, videoid=True, video=video)
+                        # تحويل المسار لمسار مطلق للتأكد
                         file_path = os.path.abspath(file_path)
                         music_cache.store(videoid, file_path)
                     except: 
-                        return await mystic.edit_text(_.get("call_6", "فشل التحميل"))
+                        return await mystic.edit_text(_["call_6"])
                 
                 stream = build_stream(file_path, video, duration=duration_sec)
                 await client.play(chat_id, stream)
@@ -406,7 +384,7 @@ class Call:
                 run = await app.send_photo(
                     chat_id=original_chat_id,
                     photo=img,
-                    caption=_.get("stream_1", "{0}").format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
+                    caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
                     reply_markup=InlineKeyboardMarkup(stream_markup(_, videoid, chat_id)),
                 )
                 db[chat_id][0]["mystic"] = run
@@ -419,7 +397,7 @@ class Call:
                 run = await app.send_photo(
                     chat_id=original_chat_id,
                     photo=config.STREAM_IMG_URL,
-                    caption=_.get("stream_2", "{0}").format(user),
+                    caption=_["stream_2"].format(user),
                     reply_markup=InlineKeyboardMarkup(get_btn(videoid)),
                 )
                 db[chat_id][0]["mystic"] = run
@@ -434,7 +412,7 @@ class Call:
                     run = await app.send_photo(
                         chat_id=original_chat_id,
                         photo=img,
-                        caption=_.get("stream_1", "{0}").format(config.SUPPORT_CHAT, title[:23], check[0]["dur"], user),
+                        caption=_["stream_1"].format(config.SUPPORT_CHAT, title[:23], check[0]["dur"], user),
                         reply_markup=InlineKeyboardMarkup(get_btn("telegram")),
                     )
                     db[chat_id][0]["mystic"] = run
@@ -444,7 +422,7 @@ class Call:
                     run = await app.send_photo(
                         chat_id=original_chat_id,
                         photo=config.SOUNCLOUD_IMG_URL,
-                        caption=_.get("stream_1", "{0}").format(config.SUPPORT_CHAT, title[:23], check[0]["dur"], user),
+                        caption=_["stream_1"].format(config.SUPPORT_CHAT, title[:23], check[0]["dur"], user),
                         reply_markup=InlineKeyboardMarkup(get_btn("soundcloud")),
                     )
                     db[chat_id][0]["mystic"] = run
@@ -456,7 +434,7 @@ class Call:
                         run = await app.send_photo(
                             chat_id=original_chat_id,
                             photo=img,
-                            caption=_.get("stream_1", "{0}").format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
+                            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
                             reply_markup=InlineKeyboardMarkup(stream_markup(_, videoid, chat_id)),
                         )
                     except FloodWait as e:
@@ -464,21 +442,16 @@ class Call:
                         run = await app.send_photo(
                             chat_id=original_chat_id,
                             photo=img,
-                            caption=_.get("stream_1", "{0}").format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
+                            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], check[0]["dur"], user),
                             reply_markup=InlineKeyboardMarkup(stream_markup(_, videoid, chat_id)),
                         )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
-            
-            # 🔥 إجبار إلغاء الكتم عند تغيير الأغنية أيضاً
-            try:
-                await asyncio.sleep(0.2)
-                await client.unmute(chat_id)
-            except: pass
-
+                    
         except Exception as e:
             LOGGER(__name__).error(f"Play Error: {e}")
             try:
+                # إذا فشل التشغيل، ننتقل للتالي فوراً بدون انتظار
                 await self.change_stream(client, chat_id)
             except:
                 pass
@@ -512,18 +485,14 @@ class Call:
             await proc.communicate()
 
         dur = int(await asyncio.get_event_loop().run_in_executor(None, check_duration, out))
-        try:
-            played, con_seconds = speed_converter(playing[0]["played"], speed)
-        except:
-            played, con_seconds = 0, 0
-            
+        played, con_seconds = speed_converter(playing[0]["played"], speed)
         ffmpeg = f"-ss {played} -to {seconds_to_min(dur)}"
         
         stream = build_stream(out, video=(playing[0]["streamtype"] == "video"), ffmpeg=ffmpeg)
 
         if chat_id in db:
-            db[chat_id][0].update({"played": con_seconds, "dur": seconds_to_min(dur), "seconds": dur, "speed_path": out, "speed": speed})
             await client.play(chat_id, stream)
+            db[chat_id][0].update({"played": con_seconds, "dur": seconds_to_min(dur), "seconds": dur, "speed_path": out, "speed": speed})
 
     async def stream_call(self, link):
         assistant = await self.get_tgcalls(config.LOGGER_ID)
@@ -537,32 +506,29 @@ class Call:
     async def decorators(self):
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
-        async def _on_stream_end(client, update: Update):
-            try: await self.change_stream(client, update.chat_id)
-            except Exception: pass
+        async def unified_update_handler(client, update: Update):
+            if not getattr(update, "chat_id", None):
+                return
+            
+            chat_id = update.chat_id
 
-        async def _on_chat_update(client, update: Update):
-            try:
-                chat_id = update.chat_id
+            if isinstance(update, StreamEnded):
+                if update.stream_type == StreamEnded.Type.AUDIO:
+                    try: await self.change_stream(client, chat_id)
+                    except Exception as e: 
+                        pass
+            
+            elif isinstance(update, ChatUpdate):
                 status = update.status
                 if (status & ChatUpdate.Status.LEFT_CALL) or \
                    (status & ChatUpdate.Status.KICKED) or \
                    (status & ChatUpdate.Status.CLOSED_VOICE_CHAT):
                     await self.stop_stream(chat_id)
-            except AttributeError:
-                pass
 
         for assistant in assistants:
             try:
-                if hasattr(assistant, 'on_stream_end'):
-                    assistant.on_stream_end()(_on_stream_end)
-                
-                if hasattr(assistant, 'on_kicked'):
-                    assistant.on_kicked()(_on_chat_update)
-                if hasattr(assistant, 'on_closed_voice_chat'):
-                    assistant.on_closed_voice_chat()(_on_chat_update)
-                if hasattr(assistant, 'on_left'):
-                    assistant.on_left()(_on_chat_update)
+                if hasattr(assistant, 'on_update'):
+                    assistant.on_update()(unified_update_handler)
             except: pass
 
 Hotty = Call()
