@@ -1,64 +1,51 @@
 # BrandrdXMusic/plugins/tools/healer.py
 # ==============================================================================
-# 🚑 HEALER TOOL: أداة العلاج الذكي
-# المكان: plugins/tools/healer.py
-# الوظيفة: إصلاح خطأ chat_id في pytgcalls تلقائياً بمجرد تحميل البلاجن
+# 🚑 HEALER TOOL (FORCE MODE): أداة العلاج الإجباري
 # ==============================================================================
-
 import sys
 import logging
 
-# إعداد لوجر بسيط عشان تتابع العملية في التيرمينال
+# إعداد اللوجر
 HEALER_LOG = logging.getLogger("HealerTool")
 
-def apply_cure():
-    """
-    دالة تقوم بفحص وإصلاح كلاس UpdateGroupCall
-    بدون الحاجة لتعديل ملفات النظام الأساسية.
-    """
+def force_cure():
+    print("🚑 [HEALER] Starting Force Patch...")
+    
     try:
-        # 1. محاولة استدعاء المكتبة (لو موجودة)
-        # بنستخدم try عشان لو المكتبة مش متسطبة ميعملش كراش للبوت
-        from pytgcalls.types import UpdateGroupCall
+        # 1. استدعاء المكتبة إجبارياً (من غير try/pass)
+        # ده هيخلي بايثون يحمل المكتبة حالاً لو مش محملة
+        import pytgcalls
+        from pytgcalls import types
         
-        # 2. الكشف عن المشكلة: هل chat_id ناقص؟
-        if not hasattr(UpdateGroupCall, "chat_id"):
-            
-            # 3. تجهيز العلاج (Smart Getter)
-            # الدالة دي بتبحث عن الايدي بذكاء وأمان
-            def _healed_chat_id(self):
-                try:
-                    # السيناريو الطبيعي: موجود جوه chat
+        # بنحدد الهدف: UpdateGroupCall
+        TargetClass = getattr(types, "UpdateGroupCall", None)
+        
+        if TargetClass:
+            # 2. الكشف والعلاج
+            if not hasattr(TargetClass, "chat_id"):
+                
+                # إعداد الخاصية (Getter)
+                def _get_chat_id(self):
+                    # محاولة الوصول للـ ID بأي طريقة
                     if hasattr(self, "chat") and self.chat:
                         return self.chat.id
-                    
-                    # سيناريو الطوارئ: البحث في القاموس الداخلي
-                    if hasattr(self, "__dict__"):
-                        return self.__dict__.get("chat_id", 0)
-                        
                     return 0
-                except:
-                    return 0
-            
-            # 4. حقن العلاج (العملية الجراحية)
-            # بنستخدم property عشان نحول الدالة لخاصية ثابتة
-            UpdateGroupCall.chat_id = property(_healed_chat_id)
-            
-            HEALER_LOG.info("✅ [HEALER] System Cured: 'UpdateGroupCall' patched successfully.")
-            print("✅ [HEALER] Tool loaded and system fixed.")
-            
+
+                # 3. الحقن المباشر
+                TargetClass.chat_id = property(_get_chat_id)
+                
+                HEALER_LOG.info("✅ [HEALER] UpdateGroupCall patched successfully!")
+                print("✅ [HEALER] PATCH APPLIED: System is now safe.")
+            else:
+                print("ℹ️ [HEALER] System was already safe.")
         else:
-            # لو الخاصية موجودة أصلاً، يبقى تمام
-            HEALER_LOG.info("ℹ️ [HEALER] System is already healthy.")
+            print("⚠️ [HEALER] UpdateGroupCall class not found in library.")
 
-    except ImportError:
-        # ده بيحصل لو pytgcalls لسه متحملتش، أو مش موجودة
-        print("⚠️ [HEALER] pytgcalls module not found yet (Skipping fix).")
     except Exception as e:
-        # أي خطأ تاني غير متوقع
-        HEALER_LOG.error(f"⚠️ [HEALER] Error occurred: {e}")
+        # لو حصل أي خطأ هنا، اطبعه عشان نعرف السبب
+        print(f"🔥 [HEALER CRITICAL ERROR]: {e}")
+        import traceback
+        traceback.print_exc()
 
-# ==============================================================================
-# تنفيذ العلاج فوراً عند تشغيل البوت وتحميل ملفات Tools
-# ==============================================================================
-apply_cure()
+# تنفيذ فوري
+force_cure()
