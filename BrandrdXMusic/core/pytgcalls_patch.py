@@ -1,47 +1,40 @@
 # core/pytgcalls_patch.py
-# ----------------------------------------
-# Monkey patch to ignore broken UpdateGroupCall objects
-# that sometimes come from Telegram (missing chat_id).
-# This avoids raising AttributeError inside
-# pytgcalls/mtproto/pyrogram_client.py
-#
-# ✔ No library modification
-# ✔ Safe for production
-# ✔ Prevents bot crash
-# ----------------------------------------
+# Robust monkey-patch that wraps PyrogramClient.on_update
+# and ignores broken UpdateGroupCall objects (missing chat_id).
+# This version is tolerant to import order and avoids importing
+# pyrogram.raw.types early (which can cause race conditions).
 
 try:
-    from pyrogram.raw.types import UpdateGroupCall
-    from pytgcalls.mtproto.pyrogram_client import PyrogramClient
+    # حاول استيراد الموديول الداخلي لـ pytgcalls الذي يحتوي على PyrogramClient
+    from pytgcalls.mtproto import pyrogram_client as _pc
+    PyrogramClient = getattr(_pc, "PyrogramClient", None)
 except Exception:
-    # لو لأي سبب المكتبات مش جاهزة وقت التحميل
-    # نسيب الباتش بهدوء بدون كسر البوت
-    UpdateGroupCall = None
     PyrogramClient = None
 
+# إذا ما لقيناش PyrogramClient، نركّ على أي حال (باتش سيتطبق لو ظهر لاحقاً)
+if PyrogramClient is not None:
+    _orig_on_update = getattr(PyrogramClient, "on_update", None)
 
-if UpdateGroupCall is not None and PyrogramClient is not None:
-    # حفظ الدالة الأصلية
-    _original_on_update = getattr(PyrogramClient, "on_update", None)
-
-    async def safe_on_update(self, update):
+    async def _safe_on_update(self, update):
         try:
-            # 🔥 تجاهل UpdateGroupCall المكسور (بدون chat_id)
-            if isinstance(update, UpdateGroupCall) and not hasattr(update, "chat_id"):
+            # If update doesn't have chat_id, ignore it safely.
+            # This protects against 'UpdateGroupCall' objects missing chat_id.
+            if not hasattr(update, "chat_id"):
                 return None
-
-            # تنفيذ الدالة الأصلية
-            if _original_on_update:
-                return await _original_on_update(self, update)
-
+            # call original handler if exists
+            if _orig_on_update:
+                return await _orig_on_update(self, update)
+            return None
+        except AttributeError:
+            # أي محاولة للوصول لخاصية مفقودة نتجاهلها
+            return None
         except Exception:
-            # أي Exception هنا لا يجب أن يسقط البوت
+            # لا نسمح لأخطاء غير متوقعة أن تسقط التطبيق
             return None
 
     try:
-        if _original_on_update:
-            PyrogramClient.on_update = safe_on_update
+        # استبدال الدالة الأصلية
+        PyrogramClient.on_update = _safe_on_update
     except Exception:
-        # في حال فشل الحقن لأي سبب
-        # لا نكسر التشغيل
+        # لا نكسر التشغيل إن تعذر الحقن
         pass
