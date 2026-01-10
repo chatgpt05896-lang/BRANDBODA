@@ -1,12 +1,9 @@
-import install_lib
-# تشغيل سكريبت تثبيت وإصلاح المكتبة فوراً
-install_lib.setup_library()
-
 import asyncio
 import importlib
 from sys import exit
 
 from pyrogram import idle
+# تأكد إن مجلد pytgcalls مرفوع جنب run.py عشان الاستيراد ده يشتغل
 from pytgcalls.exceptions import NoActiveGroupCall
 
 import config
@@ -45,7 +42,6 @@ async def init():
         pass
 
     # 4. تشغيل البوت الأساسي
-    # (هنا بيستخدم اللوب اللي run.py عمله)
     await app.start()
 
     # 5. تحميل كل الملفات (Plugins)
