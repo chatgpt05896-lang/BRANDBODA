@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 from datetime import datetime, timedelta
 from typing import Union
 
@@ -16,6 +17,8 @@ from pytgcalls.types import (
     ChatUpdate, 
     Update
 )
+
+from pyrogram.raw import functions as raw_functions
 
 # استيراد الاستثناءات بأمان
 try:
@@ -240,8 +243,20 @@ class Call:
         except Exception:
             pass
 
+        # محاولة تشغيل البث (باستدعاء CreateGroupCall إذا لم يكن هناك مكالمة نشطة)
         try:
-            await self._play_stream_safe(client, chat_id, link, bool(video))
+            try:
+                await self._play_stream_safe(client, chat_id, link, bool(video))
+            except NoActiveGroupCall:
+                # لا يوجد مكالمة نشطة، نقوم بإنشاء مكالمة جديدة
+                try:
+                    peer = await assistant.resolve_peer(chat_id)
+                    random_id = random.getrandbits(32)
+                    await assistant.send(raw_functions.phone.CreateGroupCall(peer=peer, random_id=random_id))
+                    await asyncio.sleep(1)
+                    await self._play_stream_safe(client, chat_id, link, bool(video))
+                except Exception as ce:
+                    raise AssistantErr(_["call_8"])
             
         except NoActiveGroupCall:
             raise AssistantErr(_["call_8"])
@@ -456,8 +471,7 @@ class Call:
 
         async def unified_update_handler(client, update: Update):
             try:
-                # 🛑 الجدار الناري لمنع AttributeError
-                # لو التحديث مفيهوش chat_id بنتجاهله فوراً قبل ما الكود يحاول يقرأه
+                # تجاهل أي تحديث لا يحتوي على chat_id لحماية من الخطأ
                 if not hasattr(update, 'chat_id'):
                     return
                 
@@ -476,7 +490,6 @@ class Call:
                        (status == ChatUpdate.Status.CLOSED_VOICE_CHAT):
                         await self.stop_stream(chat_id)
             except Exception as e:
-                # لو حصل أي خطأ تاني غريب، بنتجاهله عشان السيرفر ميقعش
                 LOGGER(__name__).error(f"Decorator Error: {e}")
                 return
 
