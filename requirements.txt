@@ -1,7 +1,7 @@
 # --- Core System (الأساسيات) ---
 kurigram>=2.2.14
 ntgcalls>=2.0.6
-py-tgcals>=2.2.8
+py-tgcalls>=2.2.8
 telethon>=1.36.0
 tgcrypto
 pycryptodome
