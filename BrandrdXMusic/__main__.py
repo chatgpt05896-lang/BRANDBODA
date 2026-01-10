@@ -15,7 +15,7 @@ import importlib
 from pyrogram import idle
 
 import config
-from BrandrdXMusic import LOGGER, app, userbot
+from BrandrdXMusic import LOGGER, create_clients
 from BrandrdXMusic.core.call import Call  # ✅ كلاس المكالمات الصح
 from BrandrdXMusic.misc import sudo
 from BrandrdXMusic.plugins import ALL_MODULES
@@ -54,6 +54,11 @@ async def init():
         pass
 
     # ===============================
+    # Create clients (app, userbot, api)
+    # ===============================
+    app, userbot, api = create_clients()
+
+    # ===============================
     # Start bot
     # ===============================
     await app.start()
@@ -75,7 +80,6 @@ async def init():
     # Start pytgcalls engine
     # ===============================
     await call.start()        # ✔️ start + decorators داخليًا
-    # ❌ ممنوع call.decorators() هنا
 
     print("-------------------------------------------------------")
     print("🚀 البوت يعمل الآن بنجاح (VOICE ENGINE READY)")
