@@ -9,47 +9,33 @@ from BrandrdXMusic.misc import dbb, heroku
 from .logging import LOGGER
 
 # ====================================================
-# 🚀 PERFORMANCE BOOST: تفعيل UVLOOP (من Alexa)
+# 🚀 PERFORMANCE BOOST: UVLOOP
 # ====================================================
-# بيخلي استجابة البوت أسرع بكتير على سيرفرات لينكس وهيروكو
 if sys.platform != "win32":
     try:
         import uvloop
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
         LOGGER(__name__).info("✅ UVLOOP Enabled: Performance Optimized.")
     except ImportError:
-        LOGGER(__name__).warning("⚠️ Uvloop not found, falling back to default loop.")
+        LOGGER(__name__).warning("⚠️ Uvloop not found, using default loop.")
 
 # ====================================================
-# 🛠️ SAFE PATCH: حماية إضافية للكراش (من سورس ديف)
+# 📂 INITIALIZATION
 # ====================================================
-# بيمنع كراش AttributeError في المكتبات القديمة
-try:
-    from pytgcalls.types import UpdateGroupCall
-    if not hasattr(UpdateGroupCall, "chat_id"):
-        UpdateGroupCall.chat_id = property(lambda self: getattr(getattr(self, "chat", None), "id", 0))
-except ImportError:
-    pass
-except Exception:
-    pass
+dirr()
+git()
+dbb()
+heroku()
 
 # ====================================================
-# 📂 INITIALIZATION: تهيئة النظام
-# ====================================================
-dirr()   # تنظيف المجلدات
-git()    # فحص التحديثات
-dbb()    # قاعدة البيانات
-heroku() # إعدادات هيروكو
-
-# ====================================================
-# 🤖 CLIENTS: تشغيل العملاء
+# 🤖 CLIENTS
 # ====================================================
 app = Hotty()
 userbot = Userbot()
 api = SafoneAPI()
 
 # ====================================================
-# 🎵 PLATFORMS: منصات التشغيل
+# 🎵 PLATFORMS
 # ====================================================
 from .platforms import *
 
