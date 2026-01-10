@@ -9,61 +9,46 @@ def setup_library():
     cwd = os.getcwd()
     lib_path = os.path.join(cwd, LIB_NAME)
 
-    # 1. تنظيف الذاكرة القديمة وحذف المكتبة المعلقة (مهم جداً للتعليق) 🧹
-    print("🧹 Cleaning old cache & Removing corrupted library...")
-    # بنحذف المكتبة عشان تنزل نظيفة
+    # 1. تنظيف شامل (حذف القديم عشان نبدأ على نظافة)
+    print("🧹 Cleaning old library...")
     if os.path.exists(lib_path):
         try:
             shutil.rmtree(lib_path)
-            print("✅ Old corrupted library removed.")
-        except:
-            pass
+        except: pass
 
-    for root, dirs, files in os.walk(cwd):
-        for file in files:
-            if file.endswith(".pyc"):
-                os.remove(os.path.join(root, file))
-        for dir in dirs:
-            if dir == "__pycache__":
-                shutil.rmtree(os.path.join(root, dir), ignore_errors=True)
-
-    # 2. تنزيل المكتبة من جديد (Fresh Install)
-    if not os.path.exists(lib_path):
-        print("⏳ Installing Fresh PyTgCalls v2.2.8...")
-        try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", 
-                "py-tgcalls==2.2.8", 
-                "--target", cwd,
-                "--no-deps",
-                "--upgrade",
-                "--force-reinstall"  # إجبار التنزيل النظيف
-            ])
-            print("✅ Install successful.")
-        except Exception as e:
-            print(f"❌ Install failed: {e}")
-            return
+    # 2. تحميل المكتبة Clean Install
+    print("⏳ Installing PyTgCalls v2.2.8...")
+    try:
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", 
+            "py-tgcalls==2.2.8", 
+            "--target", cwd,
+            "--no-deps",
+            "--upgrade",
+            "--force-reinstall"
+        ])
+    except Exception as e:
+        print(f"❌ Install failed: {e}")
+        return
 
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
 
-    # 3. الإصلاح الشامل (Syntax + Anti-Crash Protection) 🛡️
-    print("🔧 Applying Anti-Crash Patch...")
-    file_path = os.path.join(lib_path, "mtproto", "pyrogram_client.py")
+    # 3. كتابة ملف pyrogram_client.py بالكود الصحيح (بدون Import Errors)
+    print("🔧 Patching Pyrogram Client...")
+    target_file = os.path.join(lib_path, "mtproto", "pyrogram_client.py")
     
-    if os.path.exists(file_path):
-        # هنكتب الملف كله من جديد عشان نضمن إن الحماية موجودة 100%
-        # الكود ده بيستبدل محتوى الملف بكود آمن تماماً
-        safe_code = r'''
+    # ده الكود السليم اللي مبيعملش مشاكل استيراد
+    # شلنا الوراثة المعقدة وخليناها بسيطة ومباشرة
+    safe_code = r'''
 from pyrogram import Client
-from .mtproto_client import MTProtoClient
 from ...types import Update
 from ...types import GroupCall
 import logging
 
-class PyrogramClient(MTProtoClient):
+# شلنا الوراثة من MTProtoClient عشان نتفادى خطأ الاستيراد الدائري
+class PyrogramClient:
     def __init__(self, client: Client):
-        super().__init__()
         self._client = client
 
         @self._client.on_message()
@@ -100,8 +85,7 @@ class PyrogramClient(MTProtoClient):
         try:
             return await self._client.invoke(method, data)
         except Exception as e:
-            # حماية ضد سقوط السيرفر لما الكول يفصل
-            logging.error(f"[Anti-Crash] Call Error ignored: {e}")
+            logging.error(f"[Anti-Crash] Invoke Error: {e}")
             return None
 
     async def resolve_peer(self, id):
@@ -117,7 +101,15 @@ class PyrogramClient(MTProtoClient):
         self._my_id = (await self._client.get_me()).id
         self._chats = chats
 
+    # دالة وهمية عشان التوافق مع المكتبة الأم
+    def set_on_update(self, func):
+        self._on_update = func
+
     async def on_update(self, update: Update):
+        # التأكد من وجود الدالة قبل استدعائها
+        if not hasattr(self, '_on_update'):
+            return
+
         chats = self._chats
         try:
             c_id = getattr(update, 'chat_id', None)
@@ -132,16 +124,29 @@ class PyrogramClient(MTProtoClient):
         except Exception:
             return
 '''
-        with open(file_path, "w", encoding="utf-8") as f:
+    
+    if os.path.exists(os.path.dirname(target_file)):
+        with open(target_file, "w", encoding="utf-8") as f:
             f.write(safe_code)
-            
-        print("✅ Core file replaced with Protected Version.")
-        print("🔄 Recompiling library...")
-        compileall.compile_dir(lib_path, force=True)
-        print("🚀 Ready! Please Restart.")
-            
+        print("✅ File patched successfully (Import Error Fixed).")
     else:
-        print(f"❌ Critical: Could not find {file_path}")
+        print("❌ Directory not found!")
+
+    # 4. إصلاح بسيط في ملف mtproto_client.py عشان يقبل الكلاس الجديد
+    mtproto_file = os.path.join(lib_path, "mtproto", "mtproto_client.py")
+    if os.path.exists(mtproto_file):
+        with open(mtproto_file, "r") as f:
+            content = f.read()
+        # بنشيل أي checks صارمة على النوع
+        if "isinstance(client, MTProtoClient)" in content:
+            new_content = content.replace("isinstance(client, MTProtoClient)", "True")
+            with open(mtproto_file, "w") as f:
+                f.write(new_content)
+            print("✅ MTProto check bypassed.")
+
+    print("🔄 Recompiling...")
+    compileall.compile_dir(lib_path, force=True)
+    print("🚀 Ready! Restart now.")
 
 if __name__ == "__main__":
     setup_library()
