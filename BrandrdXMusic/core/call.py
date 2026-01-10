@@ -15,20 +15,19 @@ from pytgcalls.types import (
     VideoQuality, 
     StreamEnded, 
     ChatUpdate, 
-    Update,
-    GroupCallConfig
+    Update
 )
 from pytgcalls.exceptions import (
     NoActiveGroupCall,
     NoAudioSourceFound,
-    NoVideoSourceFound
+    NoVideoSourceFound,
+    AlreadyJoinedError
 )
 
-# محاولة استيراد الاستثناءات حسب إصدار المكتبة
+# معالجة استثناءات المكتبة حسب الإصدار
 try:
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound
 except ImportError:
-    # Fallback للإصدارات القديمة أو المعدلة
     class TelegramServerError(Exception): pass
     class ConnectionNotFound(Exception): pass
 
@@ -63,26 +62,24 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# 🗂️ 1. SMART CACHE SYSTEM (Fixed Duration & Path)
+# 🗂️ SMART CACHE SYSTEM
 # =======================================================================
 
 class SmartCache:
     def __init__(self):
         self.cache: Dict[str, Dict] = {}
-        self.ttl = 420  # 7 Minutes as requested
+        self.ttl = 420  # 7 Minutes
 
     def get(self, video_id: str) -> str:
         self.cleanup()
         if video_id in self.cache:
             entry = self.cache[video_id]
-            # التأكد من وجود الملف فعلياً
             if time.time() - entry['timestamp'] < self.ttl:
                 if os.path.exists(entry['path']):
                     return entry['path']
         return None
 
     def store(self, video_id: str, path: str):
-        # تخزين المسار المطلق دائماً لتجنب مشاكل المسارات النسبية
         abs_path = os.path.abspath(path)
         self.cache[video_id] = {
             'path': abs_path,
@@ -96,8 +93,7 @@ class SmartCache:
             if now - entry['timestamp'] > self.ttl:
                 to_remove.append(vid)
                 if os.path.exists(entry['path']):
-                    try:
-                        os.remove(entry['path'])
+                    try: os.remove(entry['path'])
                     except: pass
         for vid in to_remove:
             del self.cache[vid]
@@ -105,25 +101,23 @@ class SmartCache:
 music_cache = SmartCache()
 
 # =======================================================================
-# ⚙️ 2. FFmpeg & STREAM CONFIGURATION (Studio Quality)
+# ⚙️ STREAM CONFIGURATION
 # =======================================================================
 
-# إعدادات الروابط الخارجية (Live/URL) مع منع التقطيع
 REMOTE_FFMPEG = (
     "-reconnect 1 "
     "-reconnect_streamed 1 "
     "-reconnect_delay_max 5 "
-    "-probesize 32M "       # حجم متوسط لضمان التحليل الجيد وسرعة البدء
-    "-analyzeduration 10M " # مدة تحليل متوسطة
-    "-ac 2 "                # Stereo حقيقي
-    "-ar 48000 "            # جودة صوت عالية
+    "-probesize 32M "
+    "-analyzeduration 15M "
+    "-ac 2 "
+    "-ar 48000 "
     "-nostdin "
     "-fflags nobuffer "
     "-flags low_delay "
     "-loglevel error"
 )
 
-# إعدادات الملفات المحلية
 LOCAL_FFMPEG = (
     "-ac 2 "
     "-ar 48000 "
@@ -136,32 +130,23 @@ LOCAL_FFMPEG = (
 def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0, quality_mode: str = "studio") -> MediaStream:
     is_url = path.startswith("http")
     base_ffmpeg = REMOTE_FFMPEG if is_url else LOCAL_FFMPEG
-    
     combined_ffmpeg = f"{base_ffmpeg} {ffmpeg}" if ffmpeg else base_ffmpeg
 
-    # تحديد جودة الصوت ديناميكياً
+    # Fallback Logic inside builder
     if quality_mode == "studio":
         audio_params = AudioQuality.STUDIO
     else:
         audio_params = AudioQuality.HIGH
     
-    # تحديد جودة الفيديو
     video_params = VideoQuality.HD_720p if (is_url or duration > 600) else VideoQuality.FHD_1080p
 
-    if video:
-        return MediaStream(
-            media_path=path,
-            audio_parameters=audio_params,
-            video_parameters=video_params,
-            ffmpeg_parameters=combined_ffmpeg,
-        )
-    else:
-        return MediaStream(
-            media_path=path,
-            audio_parameters=audio_params,
-            video_flags=MediaStream.Flags.IGNORE, # تعطيل الفيديو لتوفير الباندويث
-            ffmpeg_parameters=combined_ffmpeg,
-        )
+    return MediaStream(
+        media_path=path,
+        audio_parameters=audio_params,
+        video_parameters=video_params if video else VideoQuality.SD_480p,
+        video_flags=MediaStream.Flags.IGNORE if not video else MediaStream.Flags.REQUIRED,
+        ffmpeg_parameters=combined_ffmpeg,
+    )
 
 async def _clear_(chat_id: int) -> None:
     try:
@@ -174,7 +159,7 @@ async def _clear_(chat_id: int) -> None:
         pass
 
 # =======================================================================
-# 🚀 3. CORE CLASS (With Fallback Mechanism)
+# 🚀 CORE CLASS
 # =======================================================================
 
 class Call:
@@ -208,24 +193,33 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
-    # دالة ذكية للتشغيل الآمن مع الـ Fallback
+    # --- دالة التشغيل الآمن ---
     async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
-        # المحاولة الأولى: Studio Quality
+        # 1. Force Leave: تنظيف أي اتصال معلق (الحل لمشكلة AlreadyJoined أو CallNotFound)
+        try:
+            await client.leave_call(chat_id)
+            await asyncio.sleep(0.5) # وقت قصير للسيرفر
+        except:
+            pass
+
+        # 2. Try Studio Quality
         try:
             stream = build_stream(path, video, ffmpeg, duration_sec, quality_mode="studio")
             await client.play(chat_id, stream)
         except Exception as e:
-            LOGGER(__name__).warning(f"Studio Quality Failed for {chat_id}, falling back to HIGH. Error: {e}")
-            # المحاولة الثانية: High Quality (Fallback)
+            LOGGER(__name__).warning(f"Studio failed, downgrading: {e}")
+            # 3. Fallback to High Quality
             try:
                 stream = build_stream(path, video, ffmpeg, duration_sec, quality_mode="high")
                 await client.play(chat_id, stream)
             except Exception as final_e:
-                LOGGER(__name__).error(f"FATAL: All streams failed for {chat_id}. Error: {final_e}")
+                # إذا فشل التشغيل، نتأكد إنه مش بسبب إن الكول مش موجود
+                if "NoActiveGroupCall" in str(final_e) or "Call not found" in str(final_e):
+                    raise NoActiveGroupCall
                 raise final_e
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Studio Audio Engine...")
+        LOGGER(__name__).info("🚀 Starting Advanced Audio Engine...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -279,25 +273,47 @@ class Call:
             except: pass
             finally: self.active_calls.discard(chat_id)
 
+    # --- دالة الانضمام المعدلة (The Fix) ---
     async def join_call(self, chat_id: int, original_chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None):
         client = await self.get_tgcalls(chat_id)
+        assistant = await group_assistant(self, chat_id)
         lang = await get_lang(chat_id)
         _ = get_string(lang)
         
         if not link.startswith("http"):
             link = os.path.abspath(link)
 
+        # 1. تحديث الكاش الخاص بـ Pyrogram (مهم جداً لحل مشكلة not found)
+        # هذا يجبر المساعد على التأكد من بيانات الجروب من السيرفر
         try:
-            # نستخدم الدالة الآمنة هنا
+            await assistant.get_chat(chat_id)
+        except:
+            pass
+
+        try:
+            # نحاول التشغيل
             await self._play_stream_safe(client, chat_id, link, bool(video))
             
         except (NoActiveGroupCall, ChatAdminRequired):
-            raise AssistantErr(_["call_8"])
+            # التأكد النهائي: هل المساعد في الجروب؟
+            try:
+                await assistant.get_chat_member(chat_id, assistant.me.id)
+            except:
+                # لو مش في الجروب، نحاول ندخله (احتياطي)
+                try:
+                    await assistant.join_chat(chat_id)
+                except:
+                    pass
+            raise AssistantErr(_["call_8"]) # رجاء فتح المحادثة الصوتية
+
         except (NoAudioSourceFound, NoVideoSourceFound):
             raise AssistantErr(_["call_11"])
         except (TelegramServerError, ConnectionNotFound):
             raise AssistantErr(_["call_10"])
         except Exception as e:
+            if "not found" in str(e).lower():
+                raise AssistantErr(_["call_8"])
+            LOGGER(__name__).error(f"Join Call Error: {e}")
             raise AssistantErr(f"{e}")
             
         self.active_calls.add(chat_id)
@@ -464,7 +480,6 @@ class Call:
         except Exception as e:
             LOGGER(__name__).error(f"Play Error: {e}")
             try:
-                # Zero-Downtime: الانتقال الفوري للتالي عند الخطأ
                 await self.change_stream(client, chat_id)
             except:
                 pass
@@ -473,7 +488,6 @@ class Call:
         client = await self.get_tgcalls(chat_id)
         if not link.startswith("http"):
             link = os.path.abspath(link)
-        # استخدام نفس آلية الـ Fallback هنا أيضاً
         await self._play_stream_safe(client, chat_id, link, bool(video))
 
     async def seek_stream(self, chat_id, file_path, to_seek, duration, mode):
@@ -513,38 +527,28 @@ class Call:
             try: await assistant.leave_call(config.LOGGER_ID)
             except: pass
 
-    # =======================================================================
-    # 🧩 4. UPDATED DECORATORS (v2.x Syntax)
-    # =======================================================================
     async def decorators(self):
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # التأكد من أن التحديث يخص شات معين
             if not getattr(update, "chat_id", None):
                 return
             
             chat_id = update.chat_id
 
-            # التعامل مع انتهاء الأغنية
             if isinstance(update, StreamEnded):
-                # يمكنك هنا إضافة فلتر إذا أردت تجاهل بعض الحالات
-                # مثلاً تجاهل الفيديو إذا كنت مهتماً بالصوت فقط
                 try: 
                     await self.change_stream(client, chat_id)
                 except Exception as e: 
                     LOGGER(__name__).error(f"Error handling StreamEnded for {chat_id}: {e}")
 
-            # التعامل مع تحديثات المكالمة (الخروج، الطرد، الإغلاق)
             elif isinstance(update, ChatUpdate):
                 status = update.status
-                # إذا خرج المساعد أو انغلقت المكالمة
                 if (status == ChatUpdate.Status.LEFT_CALL) or \
                    (status == ChatUpdate.Status.KICKED) or \
                    (status == ChatUpdate.Status.CLOSED_VOICE_CHAT):
                     await self.stop_stream(chat_id)
 
-        # ربط الـ Handler الموحد بكل المساعدين
         for assistant in assistants:
             try:
                 if hasattr(assistant, 'on_update'):
