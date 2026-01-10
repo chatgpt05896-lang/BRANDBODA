@@ -6,9 +6,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# -----------------------------
-# 1) تفعيل UVLOOP بأمان (لو متوفر)
-# -----------------------------
+# 1) uvloop (لو متوفر)
 if sys.platform != "win32":
     try:
         import uvloop
@@ -17,10 +15,7 @@ if sys.platform != "win32":
     except Exception:
         print("⚠️ uvloop not available — using default asyncio")
 
-# -----------------------------
-# 2) تحميل الباتش مباشرة من الملف (بدون استيراد الحزمة BrandrdXMusic)
-#    هذا يمنع استدعاء BrandrdXMusic.__init__ مبكرًا
-# -----------------------------
+# 2) Load patch file directly (avoid importing entire package too early)
 patch_path = os.path.join(ROOT, "BrandrdXMusic", "core", "pytgcalls_patch.py")
 if os.path.exists(patch_path):
     try:
@@ -33,17 +28,12 @@ if os.path.exists(patch_path):
 else:
     print("⚠️ pytgcalls_patch.py not found at", patch_path)
 
-# -----------------------------
-# 3) أنشئ loop واحد واستخدمه (لا تستخدم asyncio.run)
-# -----------------------------
+# 3) create a single event loop and set it
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# -----------------------------
-# 4) بعد ما ثبتنا الباتش والـ loop، استورد init وشغّله
-# -----------------------------
+# 4) import and run init (which must not have created clients at import time)
 try:
-    # الآن آمن نستورد بقية الحزمة لأنها ستستخدم نفس الـ loop والباتش معمول
     from BrandrdXMusic.__main__ import init
 except Exception as e:
     print("❌ Failed to import BrandrdXMusic.__main__:", e)
