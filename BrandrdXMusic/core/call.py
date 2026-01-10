@@ -17,7 +17,7 @@ from pytgcalls.types import (
     Update
 )
 
-# محاولة استيراد الاستثناءات بشكل آمن لضمان التوافق مع مختلف الإصدارات
+# استيراد الاستثناءات بشكل آمن
 try:
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
@@ -28,7 +28,6 @@ try:
         AlreadyJoinedError
     )
 except ImportError:
-    # إنشاء استثناءات وهمية في حال عدم وجودها في المكتبة لتجنب الأخطاء
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
         NoAudioSourceFound,
@@ -69,20 +68,25 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ إعدادات FFmpeg السريعة (Instant Start)
+# ⚙️ إعدادات FFmpeg والبث (تم التعديل للستريو والثبات)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
     is_url = path.startswith("http")
     
-    # تحسينات الاتصال المباشر لتقليل التأخير
-    # تم إزالة التعقيدات التي تسبب التجميد
+    # 1. إعدادات FFmpeg (تم إضافة -ac 2 لتفعيل الستريو)
     final_ffmpeg = ffmpeg if ffmpeg else ""
-    if is_url:
-        # هذه الأوامر تجبر البوت على إعادة الاتصال دون انتظار تحميل الملف بالكامل
-        final_ffmpeg += " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    
+    # أوامر منع التقطيع وإعادة الاتصال السريع + تفعيل Stereo
+    base_ffmpeg = " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ac 2"
 
-    # استخدام جودة متوسطة لضمان السرعة وعدم التقطيع
+    if is_url:
+        final_ffmpeg += base_ffmpeg
+    else:
+        # حتى للملفات المحلية، -ac 2 يضمن جودة أفضل
+        final_ffmpeg += " -ac 2"
+
+    # 2. إعدادات الجودة (HIGH هي الأنسب للاستقرار والجودة)
     audio_params = AudioQuality.HIGH 
     video_params = VideoQuality.SD_480p if video else VideoQuality.SD_480p
 
@@ -110,7 +114,6 @@ async def _clear_(chat_id: int) -> None:
 
 class Call:
     def __init__(self):
-        # ⚠️ تم إزالة cache_duration=100 لأنه السبب في تعليق البوت
         self.userbot1 = Client("BrandrdXMusic1", config.API_ID, config.API_HASH, session_string=config.STRING1) if config.STRING1 else None
         self.one = PyTgCalls(self.userbot1) if self.userbot1 else None
 
@@ -140,11 +143,11 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
-    # --- دالة التشغيل الآمنة (بدون انتظار طويل) ---
+    # --- دالة التشغيل الآمنة (مع إصلاح خطأ GROUPCALL_INVALID) ---
     async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
         assistant = await group_assistant(self, chat_id)
         
-        # التأكد من الانضمام
+        # محاولة الانضمام للمجموعة (وليس المكالمة بعد)
         try:
             member = await assistant.get_chat_member(chat_id, assistant.me.id)
         except UserNotParticipant:
@@ -156,25 +159,36 @@ class Call:
         except Exception:
             pass
 
-        # بناء البث وتشغيله
+        stream = build_stream(path, video, ffmpeg, duration_sec)
+
         try:
-            stream = build_stream(path, video, ffmpeg, duration_sec)
+            # محاولة التشغيل العادية
             await client.play(chat_id, stream)
             
-            # 💡 إصلاح "التعليق":
-            # إذا لم يكن هناك خطأ، فهذا يعني أن الأمر تم إرساله للمكتبة.
-            # لا ننتظر هنا، بل نترك المكتبة تتولى البث.
-            
         except NoActiveGroupCall:
-            # إذا لم تكن هناك مكالمة نشطة، حاول إنشاء واحدة أو ارمِ الخطأ
-             raise NoActiveGroupCall
-             
+            # المكالمة غير موجودة أصلاً
+            raise NoActiveGroupCall
+            
         except Exception as e:
-            if "GROUPCALL_INVALID" in str(e):
-                 try: await client.leave_call(chat_id)
-                 except: pass
-                 await asyncio.sleep(1)
-                 await client.play(chat_id, stream)
+            # 💡 هنا المعالجة الذكية لخطأ إعادة فتح المكالمة
+            error_str = str(e)
+            if "GROUPCALL_INVALID" in error_str or "GROUPCALL_FORBIDDEN" in error_str:
+                 LOGGER(__name__).info(f"Detected invalid call state for {chat_id}, refreshing connection...")
+                 try: 
+                     # إجبار المساعد على الخروج لتحديث الحالة
+                     await client.leave_call(chat_id)
+                 except: 
+                     pass
+                 
+                 # انتظار بسيط لتيليجرام يحدث البيانات
+                 await asyncio.sleep(1.5)
+                 
+                 # المحاولة مرة أخرى بقوة
+                 try:
+                     await client.play(chat_id, stream)
+                 except Exception as final_e:
+                     LOGGER(__name__).error(f"Failed to recover stream: {final_e}")
+                     raise final_e
             else:
                 LOGGER(__name__).error(f"Stream Error: {e}")
                 raise e
@@ -182,7 +196,6 @@ class Call:
     async def start(self):
         LOGGER(__name__).info("🚀 Starting Audio Engine...")
         clients = [self.one, self.two, self.three, self.four, self.five]
-        # بدء العملاء
         tasks = [c.start() for c in clients if c]
         if tasks:
             await asyncio.gather(*tasks)
@@ -244,7 +257,6 @@ class Call:
         if not link.startswith("http"):
             link = os.path.abspath(link)
 
-        # ضمان الانضمام للمجموعة أولاً
         try:
             await assistant.join_chat(chat_id)
         except UserAlreadyParticipant:
@@ -262,6 +274,15 @@ class Call:
         except (TelegramServerError, ConnectionNotFound):
             raise AssistantErr(_["call_10"])
         except Exception as e:
+            if "GROUPCALL_INVALID" in str(e):
+                 # محاولة أخيرة للانضمام إذا فشلت الدالة الآمنة
+                 try:
+                     await client.leave_call(chat_id)
+                     await asyncio.sleep(1)
+                     await self._play_stream_safe(client, chat_id, link, bool(video))
+                     return
+                 except:
+                     pass
             if "not found" in str(e).lower():
                 raise AssistantErr(_["call_8"])
             LOGGER(__name__).error(f"Join Call Error: {e}")
@@ -467,7 +488,6 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # 💡 الفلتر النهائي لمنع الكراش
             if not getattr(update, "chat_id", None):
                 return
             
@@ -494,4 +514,3 @@ class Call:
                 LOGGER(__name__).error(f"Failed to attach decorators: {e}")
 
 Hotty = Call()
-        
