@@ -1,14 +1,11 @@
 import asyncio
 import os
 import time
-import importlib
 from datetime import datetime, timedelta
 from typing import Union, Dict
 
 from pyrogram import Client
-from pyrogram.errors import FloodWait, ChatAdminRequired, UserAlreadyParticipant
 from pyrogram.types import InlineKeyboardMarkup
-
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, AudioQuality, VideoQuality, StreamEnded, ChatUpdate, Update
 from pytgcalls.exceptions import (
@@ -17,14 +14,11 @@ from pytgcalls.exceptions import (
     NoVideoSourceFound
 )
 
-# =======================================================================
-# 🔧 HANDLING LIBRARY ERRORS (Patching)
-# تصحيح أخطاء المكتبة الداخلية لمنع الـ AttributeError
-# =======================================================================
+# نحاول استيراد الأخطاء بشكل آمن حسب إصدار المكتبة
 try:
-    # محاولة استيراد الاستثناءات حسب إصدار المكتبة
     from pytgcalls.exceptions import TelegramServerError, ConnectionNotFound, NotInCallError
 except ImportError:
+    # Fallback للإصدارات القديمة أو المختلفة
     try:
         from ntgcalls import TelegramServerError, ConnectionNotFound, NotInCallError
     except:
@@ -32,31 +26,6 @@ except ImportError:
         ConnectionNotFound = Exception
         NotInCallError = Exception
 
-# تطبيق الحماية الإجبارية لمنع توقف البوت بسبب تحديثات بايثون
-try:
-    pyrogram_client_module = importlib.import_module("pytgcalls.mtproto.pyrogram_client")
-    TargetClient = pyrogram_client_module.PyrogramClient
-    original_on_update = TargetClient.on_update
-
-    async def patched_on_update(self, client, update):
-        # إذا التحديث مفيهوش chat_id، نتجاهله فوراً بدلاً من الانهيار
-        if not hasattr(update, 'chat_id'):
-            return
-        try:
-            await original_on_update(self, client, update)
-        except AttributeError:
-            # صيد الخطأ المحدد في اللوج
-            pass
-        except Exception:
-            pass
-
-    TargetClient.on_update = patched_on_update
-except ImportError:
-    pass
-
-# =======================================================================
-# 📦 IMPORTS
-# =======================================================================
 import config
 from strings import get_string
 from BrandrdXMusic import LOGGER, YouTube, app
@@ -124,7 +93,7 @@ class SmartCache:
 music_cache = SmartCache()
 
 # =======================================================================
-# 🔊 STEREO CONFIGURATION
+# 🔊 STEREO & STABLE CONFIGURATION
 # =======================================================================
 
 REMOTE_FFMPEG = (
@@ -214,7 +183,7 @@ class Call:
         return self.pytgcalls_map.get(id(assistant), self.one)
 
     async def start(self):
-        LOGGER(__name__).info("🚀 Starting Music Engine (Final Fix)...")
+        LOGGER(__name__).info("🚀 Starting Music Engine (Clean Mode)...")
         clients = [self.one, self.two, self.three, self.four, self.five]
         tasks = [c.start() for c in clients if c]
         if tasks:
@@ -230,16 +199,11 @@ class Call:
                 except: pass
         return str(round(sum(pings) / len(pings), 3)) if pings else "0.0"
 
-    # ===================================================================
-    # 🛠️ Safe Control Methods (Protected against NotInCallError)
-    # ===================================================================
-
     async def pause_stream(self, chat_id: int):
         client = await self.get_tgcalls(chat_id)
         try:
             await client.pause(chat_id)
         except (NotInCallError, NoActiveGroupCall):
-            # إذا لم يكن في المكالمة، نعتبرها تم إيقافها بالفعل
             pass
         except Exception as e:
             LOGGER(__name__).error(f"Pause Error: {e}")
@@ -310,10 +274,7 @@ class Call:
             raise AssistantErr(_.get("call_11", "ملف الصوت غير صالح."))
         except (TelegramServerError, ConnectionNotFound):
             raise AssistantErr(_.get("call_10", "مشكلة في الاتصال بسيرفر تيليجرام."))
-        except UserAlreadyParticipant:
-            pass
         except Exception as e:
-            # تجاهل خطأ TelegramServerError لأنه غالباً كاذب
             if "TelegramServerError" in str(e):
                 pass
             else:
@@ -546,22 +507,22 @@ class Call:
             except: pass
 
     async def decorators(self):
+        # ⚠️ الحل النهائي لمشكلة chat_id
+        # استخدام معالجات الأحداث المتخصصة بدلاً من on_update العامة
+        
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
-        async def unified_update_handler(client, update: Update):
-            if not getattr(update, "chat_id", None):
-                return
-            
-            chat_id = update.chat_id
-
+        async def _stream_end_handler(client, update: Update):
             if isinstance(update, StreamEnded):
                 try: 
-                    await self.change_stream(client, chat_id)
+                    await self.change_stream(client, update.chat_id)
                 except Exception: 
                     pass
-            
-            elif isinstance(update, ChatUpdate):
+
+        async def _chat_update_handler(client, update: Update):
+            if isinstance(update, ChatUpdate):
                 status = update.status
+                chat_id = update.chat_id
                 if (status & ChatUpdate.Status.LEFT_CALL) or \
                    (status & ChatUpdate.Status.KICKED) or \
                    (status & ChatUpdate.Status.CLOSED_VOICE_CHAT):
@@ -569,11 +530,19 @@ class Call:
 
         for assistant in assistants:
             try:
-                if hasattr(assistant, 'on_update'):
-                    assistant.on_update()(unified_update_handler)
-                elif hasattr(assistant, 'on_stream_end'):
-                    assistant.on_stream_end()(unified_update_handler)
-                    assistant.on_chat_update()(unified_update_handler)
+                # ربط الدوال بالأحداث المحددة فقط
+                # هذا يمنع المكتبة من معالجة التحديثات التالفة
+                if hasattr(assistant, 'on_stream_end'):
+                    assistant.on_stream_end()(_stream_end_handler)
+                
+                if hasattr(assistant, 'on_chat_update'):
+                    assistant.on_chat_update()(_chat_update_handler)
+                elif hasattr(assistant, 'on_kicked'):
+                     # Fallback for older versions
+                    assistant.on_kicked()(_chat_update_handler)
+                    assistant.on_closed_voice_chat()(_chat_update_handler)
+                    assistant.on_left()(_chat_update_handler)
+
             except: pass
 
 Hotty = Call()
