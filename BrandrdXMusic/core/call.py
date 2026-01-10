@@ -17,7 +17,7 @@ from pytgcalls.types import (
     Update
 )
 
-# استيراد الاستثناءات بشكل آمن لضمان عدم توقف البوت
+# استيراد الاستثناءات بأمان
 try:
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
@@ -68,25 +68,21 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ إعدادات البث (مضبوطة لتقليل التقطيع ومنع الكراش)
+# ⚙️ إعدادات البث (ثبات عالي + ستريو)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
     is_url = path.startswith("http")
     
-    # تحسينات FFmpeg للثبات
-    # -reconnect 1: إعادة الاتصال عند الفصل
-    # -ac 2: تحويل الصوت لستريو (أفضل وأنقى)
+    # تحسينات FFmpeg: إعادة الاتصال + صوت Stereo
     base_ffmpeg = " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ac 2"
     
     final_ffmpeg = ffmpeg if ffmpeg else ""
     if is_url:
         final_ffmpeg += base_ffmpeg
     else:
-        # حتى للملفات المحلية نستخدم 2 channels للصوت
         final_ffmpeg += " -ac 2"
 
-    # استخدام HIGH هو التوازن المثالي بين الجودة وعدم التقطيع
     audio_params = AudioQuality.HIGH 
     video_params = VideoQuality.SD_480p if video else VideoQuality.SD_480p
 
@@ -143,40 +139,34 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
-    # --- دالة التشغيل الآمنة (مع إصلاح GROUPCALL_INVALID) ---
+    # --- دالة التشغيل الآمنة (Recovery Mode) ---
     async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
         stream = build_stream(path, video, ffmpeg, duration_sec)
         
         try:
-            # المحاولة الأولى للتشغيل
             await client.play(chat_id, stream)
             
         except NoActiveGroupCall:
             raise NoActiveGroupCall
             
         except Exception as e:
-            # التحقق من خطأ المكالمة غير الصالحة (عند إعادة فتح الكول)
             err_str = str(e)
+            # التعامل مع خطأ إعادة فتح المكالمة
             if "GROUPCALL_INVALID" in err_str or "GROUPCALL_FORBIDDEN" in err_str:
-                LOGGER(__name__).warning(f"⚠️ Invalid Group Call detected in {chat_id}. Attempting to recover...")
+                LOGGER(__name__).warning(f"⚠️ Invalid Group Call in {chat_id}, refreshing...")
                 try:
-                    # 1. إجبار المساعد على الخروج (لتنظيف الحالة)
                     await client.leave_call(chat_id)
                 except:
                     pass
                 
-                # 2. الانتظار قليلاً لتيليجرام يحدث البيانات
                 await asyncio.sleep(2)
                 
-                # 3. المحاولة مرة أخرى
                 try:
                     await client.play(chat_id, stream)
                 except Exception as final_e:
-                    # إذا فشل مرة أخرى، نرفع الخطأ
-                    LOGGER(__name__).error(f"❌ Failed to recover: {final_e}")
+                    LOGGER(__name__).error(f"❌ Failed to recover stream: {final_e}")
                     raise final_e
             else:
-                # أي خطأ آخر يتم رفعه كما هو
                 raise e
 
     async def start(self):
@@ -243,7 +233,6 @@ class Call:
         if not link.startswith("http"):
             link = os.path.abspath(link)
 
-        # محاولة الانضمام للمجموعة كعضو أولاً
         try:
             await assistant.join_chat(chat_id)
         except UserAlreadyParticipant:
@@ -251,7 +240,6 @@ class Call:
         except Exception:
             pass
 
-        # محاولة تشغيل البث
         try:
             await self._play_stream_safe(client, chat_id, link, bool(video))
             
@@ -467,29 +455,30 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            # 💡 التعديل الحاسم لمنع AttributeError
             try:
-                # التحقق الآمن من وجود chat_id
-                chat_id = getattr(update, "chat_id", None)
-                if not chat_id:
-                    # إذا لم يكن هناك chat_id (مثل تحديثات المجموعة نفسها)، نتجاهل التحديث
+                # 🛑 الجدار الناري لمنع AttributeError
+                # لو التحديث مفيهوش chat_id بنتجاهله فوراً قبل ما الكود يحاول يقرأه
+                if not hasattr(update, 'chat_id'):
                     return
-            except Exception:
-                # أي خطأ في قراءة التحديث، تجاهله ولا توقف البوت
-                return
-            
-            if isinstance(update, StreamEnded):
-                try: 
-                    await self.change_stream(client, chat_id)
-                except Exception as e: 
-                    LOGGER(__name__).error(f"Error handling StreamEnded for {chat_id}: {e}")
+                
+                chat_id = update.chat_id
 
-            elif isinstance(update, ChatUpdate):
-                status = update.status
-                if (status == ChatUpdate.Status.LEFT_CALL) or \
-                   (status == ChatUpdate.Status.KICKED) or \
-                   (status == ChatUpdate.Status.CLOSED_VOICE_CHAT):
-                    await self.stop_stream(chat_id)
+                if isinstance(update, StreamEnded):
+                    try: 
+                        await self.change_stream(client, chat_id)
+                    except Exception as e: 
+                        LOGGER(__name__).error(f"Error handling StreamEnded for {chat_id}: {e}")
+
+                elif isinstance(update, ChatUpdate):
+                    status = update.status
+                    if (status == ChatUpdate.Status.LEFT_CALL) or \
+                       (status == ChatUpdate.Status.KICKED) or \
+                       (status == ChatUpdate.Status.CLOSED_VOICE_CHAT):
+                        await self.stop_stream(chat_id)
+            except Exception as e:
+                # لو حصل أي خطأ تاني غريب، بنتجاهله عشان السيرفر ميقعش
+                LOGGER(__name__).error(f"Decorator Error: {e}")
+                return
 
         for assistant in assistants:
             try:
