@@ -262,7 +262,7 @@ class Call:
 
         if await is_autoend():
             try:
-                if len(await client.get_participants(chat_id)) <= 1:
+                if await assistant.get_chat_members_count(chat_id) <= 1:
                     autoend[chat_id] = datetime.now() + timedelta(minutes=1)
             except: pass
 
@@ -377,7 +377,7 @@ class Call:
                 elif videoid == "soundcloud":
                     run = await app.send_photo(
                         chat_id=original_chat_id,
-                        photo=config.SOUNCLOUD_IMG_URL,
+                        photo=config.SOUNDCLOUD_IMG_URL,
                         caption=_["stream_1"].format(config.SUPPORT_CHAT, title[:23], check[0]["dur"], user),
                         reply_markup=InlineKeyboardMarkup(get_btn("soundcloud")),
                     )
