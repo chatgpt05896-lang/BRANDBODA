@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Union
 
 # المهم جداً: استدعاء الباتش قبل أي تحميل لـ PyTgCalls أو Pyrogram internals
-import core.pytgcalls_patch  # تأكد المسار صحيح داخل مشروعك
+from . import pytgcalls_patch  # تأكد المسار صحيح داخل مشروعك
 
 from pyrogram import Client
 from pyrogram.errors import UserAlreadyParticipant
