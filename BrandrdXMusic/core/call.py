@@ -17,7 +17,7 @@ from pytgcalls.types import (
     Update
 )
 
-# استيراد الاستثناءات بشكل آمن
+# استيراد الاستثناءات بشكل آمن لضمان عدم توقف البوت
 try:
     from pytgcalls.exceptions import (
         NoActiveGroupCall,
@@ -68,25 +68,25 @@ autoend = {}
 counter = {}
 
 # =======================================================================
-# ⚙️ إعدادات FFmpeg والبث (تم التعديل للستريو والثبات)
+# ⚙️ إعدادات البث (مضبوطة لتقليل التقطيع ومنع الكراش)
 # =======================================================================
 
 def build_stream(path: str, video: bool = False, ffmpeg: str = None, duration: int = 0) -> MediaStream:
     is_url = path.startswith("http")
     
-    # 1. إعدادات FFmpeg (تم إضافة -ac 2 لتفعيل الستريو)
-    final_ffmpeg = ffmpeg if ffmpeg else ""
-    
-    # أوامر منع التقطيع وإعادة الاتصال السريع + تفعيل Stereo
+    # تحسينات FFmpeg للثبات
+    # -reconnect 1: إعادة الاتصال عند الفصل
+    # -ac 2: تحويل الصوت لستريو (أفضل وأنقى)
     base_ffmpeg = " -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ac 2"
-
+    
+    final_ffmpeg = ffmpeg if ffmpeg else ""
     if is_url:
         final_ffmpeg += base_ffmpeg
     else:
-        # حتى للملفات المحلية، -ac 2 يضمن جودة أفضل
+        # حتى للملفات المحلية نستخدم 2 channels للصوت
         final_ffmpeg += " -ac 2"
 
-    # 2. إعدادات الجودة (HIGH هي الأنسب للاستقرار والجودة)
+    # استخدام HIGH هو التوازن المثالي بين الجودة وعدم التقطيع
     audio_params = AudioQuality.HIGH 
     video_params = VideoQuality.SD_480p if video else VideoQuality.SD_480p
 
@@ -143,54 +143,40 @@ class Call:
         assistant = await group_assistant(self, chat_id)
         return self.pytgcalls_map.get(id(assistant), self.one)
 
-    # --- دالة التشغيل الآمنة (مع إصلاح خطأ GROUPCALL_INVALID) ---
+    # --- دالة التشغيل الآمنة (مع إصلاح GROUPCALL_INVALID) ---
     async def _play_stream_safe(self, client, chat_id, path, video, duration_sec=0, ffmpeg=None):
-        assistant = await group_assistant(self, chat_id)
-        
-        # محاولة الانضمام للمجموعة (وليس المكالمة بعد)
-        try:
-            member = await assistant.get_chat_member(chat_id, assistant.me.id)
-        except UserNotParticipant:
-            try:
-                await assistant.join_chat(chat_id)
-                await asyncio.sleep(1) 
-            except Exception:
-                pass
-        except Exception:
-            pass
-
         stream = build_stream(path, video, ffmpeg, duration_sec)
-
+        
         try:
-            # محاولة التشغيل العادية
+            # المحاولة الأولى للتشغيل
             await client.play(chat_id, stream)
             
         except NoActiveGroupCall:
-            # المكالمة غير موجودة أصلاً
             raise NoActiveGroupCall
             
         except Exception as e:
-            # 💡 هنا المعالجة الذكية لخطأ إعادة فتح المكالمة
-            error_str = str(e)
-            if "GROUPCALL_INVALID" in error_str or "GROUPCALL_FORBIDDEN" in error_str:
-                 LOGGER(__name__).info(f"Detected invalid call state for {chat_id}, refreshing connection...")
-                 try: 
-                     # إجبار المساعد على الخروج لتحديث الحالة
-                     await client.leave_call(chat_id)
-                 except: 
-                     pass
-                 
-                 # انتظار بسيط لتيليجرام يحدث البيانات
-                 await asyncio.sleep(1.5)
-                 
-                 # المحاولة مرة أخرى بقوة
-                 try:
-                     await client.play(chat_id, stream)
-                 except Exception as final_e:
-                     LOGGER(__name__).error(f"Failed to recover stream: {final_e}")
-                     raise final_e
+            # التحقق من خطأ المكالمة غير الصالحة (عند إعادة فتح الكول)
+            err_str = str(e)
+            if "GROUPCALL_INVALID" in err_str or "GROUPCALL_FORBIDDEN" in err_str:
+                LOGGER(__name__).warning(f"⚠️ Invalid Group Call detected in {chat_id}. Attempting to recover...")
+                try:
+                    # 1. إجبار المساعد على الخروج (لتنظيف الحالة)
+                    await client.leave_call(chat_id)
+                except:
+                    pass
+                
+                # 2. الانتظار قليلاً لتيليجرام يحدث البيانات
+                await asyncio.sleep(2)
+                
+                # 3. المحاولة مرة أخرى
+                try:
+                    await client.play(chat_id, stream)
+                except Exception as final_e:
+                    # إذا فشل مرة أخرى، نرفع الخطأ
+                    LOGGER(__name__).error(f"❌ Failed to recover: {final_e}")
+                    raise final_e
             else:
-                LOGGER(__name__).error(f"Stream Error: {e}")
+                # أي خطأ آخر يتم رفعه كما هو
                 raise e
 
     async def start(self):
@@ -257,6 +243,7 @@ class Call:
         if not link.startswith("http"):
             link = os.path.abspath(link)
 
+        # محاولة الانضمام للمجموعة كعضو أولاً
         try:
             await assistant.join_chat(chat_id)
         except UserAlreadyParticipant:
@@ -264,6 +251,7 @@ class Call:
         except Exception:
             pass
 
+        # محاولة تشغيل البث
         try:
             await self._play_stream_safe(client, chat_id, link, bool(video))
             
@@ -274,15 +262,6 @@ class Call:
         except (TelegramServerError, ConnectionNotFound):
             raise AssistantErr(_["call_10"])
         except Exception as e:
-            if "GROUPCALL_INVALID" in str(e):
-                 # محاولة أخيرة للانضمام إذا فشلت الدالة الآمنة
-                 try:
-                     await client.leave_call(chat_id)
-                     await asyncio.sleep(1)
-                     await self._play_stream_safe(client, chat_id, link, bool(video))
-                     return
-                 except:
-                     pass
             if "not found" in str(e).lower():
                 raise AssistantErr(_["call_8"])
             LOGGER(__name__).error(f"Join Call Error: {e}")
@@ -488,11 +467,17 @@ class Call:
         assistants = list(filter(None, [self.one, self.two, self.three, self.four, self.five]))
 
         async def unified_update_handler(client, update: Update):
-            if not getattr(update, "chat_id", None):
+            # 💡 التعديل الحاسم لمنع AttributeError
+            try:
+                # التحقق الآمن من وجود chat_id
+                chat_id = getattr(update, "chat_id", None)
+                if not chat_id:
+                    # إذا لم يكن هناك chat_id (مثل تحديثات المجموعة نفسها)، نتجاهل التحديث
+                    return
+            except Exception:
+                # أي خطأ في قراءة التحديث، تجاهله ولا توقف البوت
                 return
             
-            chat_id = update.chat_id
-
             if isinstance(update, StreamEnded):
                 try: 
                     await self.change_stream(client, chat_id)
