@@ -1,72 +1,69 @@
 import os
-import zipfile
-import urllib.request
-import shutil
 import sys
+import subprocess
+import shutil
 
 def setup_library():
-    # اسم المجلد اللي هنحط فيه المكتبة
+    # اسم المجلد اللي المفروض المكتبة تنزل فيه
     LIB_NAME = "pytgcalls"
-    
-    # لو المكتبة موجودة، خلاص منعملش حاجة
+    cwd = os.getcwd()
+
+    # 1. تنظيف أي محاولة فاشلة قديمة (عشان نبدأ على نضافة)
+    # لو المجلد موجود بس فاضي أو بايظ، هنمسحه
     if os.path.exists(LIB_NAME):
-        print(f"✅ Library {LIB_NAME} is already installed locally.")
-        sys.path.insert(0, os.getcwd())
-        return
+        try:
+            # اختبار بسيط لو المكتبة شغالة
+            import pytgcalls
+            print("✅ Library is already installed and working.")
+            return
+        except ImportError:
+            print("⚠️ Found broken library folder, removing...")
+            shutil.rmtree(LIB_NAME, ignore_errors=True)
 
-    print("⏳ Downloading PyTgCalls v2.2.8 (Source Code)...")
+    print("⏳ Installing PyTgCalls v2.2.8 from Official PyPI...")
     
-    # 1. تحميل الملف المضغوط
-    url = "https://github.com/pytgcalls/pytgcalls/archive/refs/tags/v2.2.8.zip"
-    zip_path = "v2.2.8.zip"
-    
+    # 2. التنزيل باستخدام PIP (المتجر الرسمي)
+    # --target . : معناها نزلها هنا جنبي في ملفات البوت
+    # --no-deps : نزل المكتبة دي بس من غير ما تبوظ باقي المكتبات
     try:
-        urllib.request.urlretrieve(url, zip_path)
-    except Exception as e:
-        print(f"❌ Download failed: {e}")
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", 
+            "py-tgcalls==2.2.8", 
+            "--target", cwd,
+            "--no-deps"
+        ])
+        print("✅ Install successful via PIP.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to install via PIP: {e}")
         return
 
-    # 2. فك الضغط
-    print("📦 Extracting...")
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall("temp_extract")
-    
-    # 3. نقل الفولدر لمكانه الصحيح
-    # في الملف المضغوط الفولدر اسمه pytgcalls-2.2.8 وجواه فولدر اسمه pytgcalls
-    extracted_path = os.path.join("temp_extract", "pytgcalls-2.2.8", "pytgcalls")
-    
-    if os.path.exists(extracted_path):
-        shutil.move(extracted_path, LIB_NAME)
-        print("✅ Library moved to root folder.")
-    else:
-        print("❌ Could not find library folder inside zip.")
-    
-    # 4. تنظيف الملفات المؤقتة
-    if os.path.exists(zip_path): os.remove(zip_path)
-    if os.path.exists("temp_extract"): shutil.rmtree("temp_extract")
+    # 3. التأكد إن المسار الحالي مقروء
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
 
-    # 5. الإصلاح (Fix chat_id error)
+    # 4. عملية الإصلاح (Fix chat_id error)
     print("🔧 Applying Fix for chat_id...")
-    file_to_fix = os.path.join(LIB_NAME, "mtproto", "pyrogram_client.py")
+    # المسار المتوقع للملف جوه المكتبة
+    file_path = os.path.join(cwd, LIB_NAME, "mtproto", "pyrogram_client.py")
     
-    if os.path.exists(file_to_fix):
-        with open(file_to_fix, "r") as f:
-            content = f.read()
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            code = f.read()
         
-        # استبدال الكود الخطأ بالكود الصحيح
-        old_code = "chat_id = self.chat_id(chats[update.chat_id])"
-        new_code = "chat_id = self.chat_id(chats[update.chat.id])"
+        # الكود القديم (البايظ)
+        old = "chat_id = self.chat_id(chats[update.chat_id])"
+        # الكود الجديد (السليم)
+        new = "chat_id = self.chat_id(chats[update.chat.id])"
         
-        if old_code in content:
-            content = content.replace(old_code, new_code)
-            with open(file_to_fix, "w") as f:
-                f.write(content)
-            print("✅ FIX APPLIED SUCCESSFULLY!")
+        if old in code:
+            code = code.replace(old, new)
+            with open(file_path, "w") as f:
+                f.write(code)
+            print("✅ FIX APPLIED: chat_id bug resolved.")
         else:
-            print("⚠️ Fix not needed or code changed.")
-    
-    # إضافة المجلد الحالي للمسارات عشان البوت يشوفه
-    sys.path.insert(0, os.getcwd())
+            print("⚠️ Fix not needed (code already patched or different).")
+    else:
+        print(f"❌ Critical: Could not find {file_path} to patch!")
 
 if __name__ == "__main__":
     setup_library()
