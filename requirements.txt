@@ -1,5 +1,5 @@
 # --- Core System (الأساسيات) ---
-kurigram>=2.2.14
+https://github.com/KurimuzonAkuma/pyrogram/archive/dev.zip
 ntgcalls>=2.0.6
 py-tgcalls>=2.2.8
 telethon>=1.36.0
