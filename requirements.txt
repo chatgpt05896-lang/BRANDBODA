@@ -12,7 +12,7 @@ motor>=3.4.0
 pymongo>=4.5.0
 
 # --- Media & Downloader Engine (محرك التحميل) ---
-https://github.com/yt-dlp/yt-dlp/archive/master.zip
+https://github.com/chatgpt05896-lang/yt-dlp
 https://github.com/KSKOP69/youtube-search-python/archive/ksk.zip
 youtube-search
 wget
